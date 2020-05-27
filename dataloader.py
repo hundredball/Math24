@@ -87,7 +87,7 @@ def read_data(diff_type):
     data_names = [x[0:6] for x in df_names.values.flatten()]
     
     # Get channel order
-    df_channel = pd.read_csv('Channel_location_angle.csv')
+    df_channel = pd.read_csv('./Channel_coordinate/Channel_location_angle.csv')
     channel_order = df_channel['Channel'].to_numpy()
     
     # Iterate over each files
