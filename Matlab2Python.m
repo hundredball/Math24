@@ -8,7 +8,7 @@ data_list = table2array(T_data);
 default_loc = readlocs('./Channel_coordinate/Standard-10-20-Cap81.locs');
 
 % Load channel of interest
-T = readtable('Channel_location_angle.xlsx');
+T = readtable('./Channel_coordinate/Channel_location_angle.xlsx');
 labels_interest = table2array(T(1:end, 1));  % labels of interest
 
 for i_data = 1:size(data_list, 1)
