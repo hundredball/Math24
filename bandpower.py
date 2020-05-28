@@ -49,6 +49,7 @@ def get_bandpower(data):
     freq_res = freqs[1] - freqs[0]  # = 1/0.5 = 2
     
     # Compute the absolute power by approximating the area under the curve
+    print('Calculating the bandpower of time-series data...')
     powers = np.zeros((data.shape[0],data.shape[1],3))
     for i in range(3):
         idx_power = idx[i,:]

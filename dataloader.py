@@ -60,7 +60,7 @@ def extract_data(data, events, i_file, diff_type):
     return X, Y, C
     
 
-def read_data(diff_type):
+def read_data(diff_type, date = 0):
     '''
     Load data from Data_Python and transform them to input and labels
 
@@ -68,6 +68,8 @@ def read_data(diff_type):
     ----------
     diff_type : iter
         difficulties of interest
+    date : int
+        chosen date
 
     Returns
     -------
@@ -83,12 +85,13 @@ def read_data(diff_type):
     '''
     
     assert hasattr(diff_type, '__iter__')
+    assert isinstance(date, int)
     assert all((isinstance(x, int) and 1<=x<=3) for x in diff_type)
     
     # Get list of data names
     df_names = pd.read_csv('./Data_Matlab/data_list.csv')
     data_names = [x[0:6] for x in df_names.values.flatten()]
-    
+    data_names = [data_names[date]]
     
     # Iterate over each files
     X_list_diff_date = [[] for x in range(3)]   # Data
@@ -182,13 +185,14 @@ def read_data(diff_type):
             
     print('Combined X shape: ', X.shape)
     
+    C = C.astype('int')
+    
     return X, Y, C
 
 
 
 if __name__ == '__main__':
     
-    X, Y, C = read_data([1,2,3])
+    X, Y, C = read_data([1,2,3], 0)
     print('X shape: ', X.shape)
-    print(C)
     
