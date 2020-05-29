@@ -185,6 +185,14 @@ def read_data(diff_type, date = 0):
             
     print('Combined X shape: ', X.shape)
     
+    # Remove trials with solution time more than 120 seconds
+    chosen_trials = np.where(Y <= 120)[0]
+    X = X[chosen_trials, :, :]
+    Y = Y[chosen_trials]
+    C = C[chosen_trials]
+    
+    print('After removing outliers, X shape: ', X.shape)
+    
     C = C.astype('int')
     
     return X, Y, C
