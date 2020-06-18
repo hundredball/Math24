@@ -59,17 +59,45 @@ def extract_data(data, events, i_file, diff_type):
     
     return X, Y, C
     
-
-def read_data(diff_type, date = 0):
+def generate_class(Y_SL):
     '''
-    Load data from Data_Python and transform them to input and labels
+    Generate class label by the mean of all the trials
+    
+    Parameters
+    ----------
+    Y_SL : numpy 1D array
+        solution latency of each trial
+    
+    Return
+    ------
+    Y_class : numpy 1D array
+        labels of each trial
+    
+    '''
+    assert isinstance(Y_SL, np.ndarray)
+    
+    threshold = np.mean(Y_SL)
+    print('Mean of all trials: %f'%(threshold))
+    
+    Y_class = Y_SL.copy()
+    Y_class[Y_class<threshold] = 0
+    Y_class[Y_class>=threshold] = 1
+    
+    return Y_class
+    
+    
+def read_data(diff_type, date = [0], pred_type = 'reg'):
+    '''
+    Load data from Data_Python and transform them into input and labels
 
     Parameters
     ----------
     diff_type : iter
-        difficulties of interest
-    date : int
-        chosen date
+        difficulties of interest (1,2,3)
+    date : iter
+        chosen dates
+    pred_type : str
+        regression (reg) or classification (class)
 
     Returns
     -------
@@ -85,13 +113,23 @@ def read_data(diff_type, date = 0):
     '''
     
     assert hasattr(diff_type, '__iter__')
-    assert isinstance(date, int)
+    assert hasattr(date, '__iter__')
     assert all((isinstance(x, int) and 1<=x<=3) for x in diff_type)
+    
+    # Assign path depending on regression or classification
+    if pred_type == 'reg':
+        channel_limit = 128
+        EEG_path = 'Data_Python'
+        coord_subFileName = '_channels.csv'
+    else:
+        channel_limit = 12
+        EEG_path = 'Data_Python_Replicate'
+        coord_subFileName = '_channels_class.csv'
     
     # Get list of data names
     df_names = pd.read_csv('./Data_Matlab/data_list.csv')
     data_names = [x[0:6] for x in df_names.values.flatten()]
-    data_names = [data_names[date]]
+    data_names = [data_names[i] for i in date]
     
     # Iterate over each files
     X_list_diff_date = [[] for x in range(3)]   # Data
@@ -99,11 +137,11 @@ def read_data(diff_type, date = 0):
     C_list_diff_date = [[] for x in range(3)]   # Channel info
     
     for i_file, fileName in enumerate(data_names):
-        EEG = sio.loadmat('./Data_Python/%s.mat'%(fileName))
+        EEG = sio.loadmat('./%s/%s.mat'%(EEG_path, fileName))
         data = EEG['data']
         events = EEG['event']
         chanlocs = EEG['chanlocs']
-        if data.shape[0]!=128:
+        if data.shape[0]!=channel_limit:
             print('%s has only %d channels'%(fileName, data.shape[0]))
             continue
         
@@ -125,7 +163,7 @@ def read_data(diff_type, date = 0):
         '''
         d = {'label':chan_label, 'theta':chan_theta, 'arc_length':chan_arc_length}
         channels = pd.DataFrame(data=d)
-        channels.to_csv('./Channel_coordinate/%s_channels.csv'%(fileName))
+        channels.to_csv('./Channel_coordinate/%s'%(fileName+coord_subFileName))
         
         X1, Y1, C1 = extract_data(data, events, i_file, '1')
         X2, Y2, C2 = extract_data(data, events, i_file, '2')
@@ -193,14 +231,19 @@ def read_data(diff_type, date = 0):
     
     print('After removing outliers, X shape: ', X.shape)
     
+    # Decide if Y is solution latency or class label
+    if pred_type == 'class':
+        Y_class = generate_class(Y)
+    
     C = C.astype('int')
     
-    return X, Y, C
+    return X, Y_class, C, Y
 
 
 
 if __name__ == '__main__':
     
-    X, Y, C = read_data([1,2,3], 0)
+    X, Y, C, Y_reg = read_data([1], list(range(11)), pred_type='class')
     print('X shape: ', X.shape)
+    #print(Y)
     
