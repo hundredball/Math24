@@ -125,9 +125,10 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         channel_limit = 12
         EEG_path = 'Data_Python_Replicate'
         coord_subFileName = '_channels_class.csv'
+    root_path = '/Users/hundredball/Desktop/Project_Predict/Math24/'
     
     # Get list of data names
-    df_names = pd.read_csv('./Data_Matlab/data_list.csv')
+    df_names = pd.read_csv('%s/Data_Matlab/data_list.csv'%(root_path))
     data_names = [x[0:6] for x in df_names.values.flatten()]
     data_names = [data_names[i] for i in date]
     
@@ -137,7 +138,7 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
     C_list_diff_date = [[] for x in range(3)]   # Channel info
     
     for i_file, fileName in enumerate(data_names):
-        EEG = sio.loadmat('./%s/%s.mat'%(EEG_path, fileName))
+        EEG = sio.loadmat('%s/%s/%s.mat'%(root_path, EEG_path, fileName))
         data = EEG['data']
         events = EEG['event']
         chanlocs = EEG['chanlocs']
@@ -163,7 +164,7 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         '''
         d = {'label':chan_label, 'theta':chan_theta, 'arc_length':chan_arc_length}
         channels = pd.DataFrame(data=d)
-        channels.to_csv('./Channel_coordinate/%s'%(fileName+coord_subFileName))
+        channels.to_csv('%s/Channel_coordinate/%s'%(root_path, fileName+coord_subFileName))
         
         X1, Y1, C1 = extract_data(data, events, i_file, '1')
         X2, Y2, C2 = extract_data(data, events, i_file, '2')
@@ -231,19 +232,18 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
     
     print('After removing outliers, X shape: ', X.shape)
     
-    # Decide if Y is solution latency or class label
-    if pred_type == 'class':
-        Y_class = generate_class(Y)
-    
     C = C.astype('int')
     
-    return X, Y_class, C, Y
-
+    # Return data, channel and Y_class, Y_reg depending on mode
+    if pred_type == 'class':
+        Y_class = generate_class(Y)
+        return X, Y_class, Y, C
+    else:
+        return X, Y, C
 
 
 if __name__ == '__main__':
     
-    X, Y, C, Y_reg = read_data([1], list(range(11)), pred_type='class')
+    X, Y_class, Y_reg, C = read_data([1], list(range(11)), pred_type='class')
     print('X shape: ', X.shape)
-    #print(Y)
     
