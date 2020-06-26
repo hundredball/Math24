@@ -86,19 +86,27 @@ def STFT(data, SLs, low, high):
     assert isinstance(low, int) and isinstance(high, int)
     assert (high >= low >= 0)
     
-    f, t, Zxx = signal.stft(data, fs, nperseg = 512)
+    f, t, Zxx = signal.stft(data, fs, nperseg = 512, noverlap = 512-3, axis=2)
     
-    # Interpolate to make 114 steps for 2-30 Hz
-    interp = interpolate.interp1d(f, Zxx, axis=2)
-    new_f = np.linspace(0, f[-1], 2*(f.shape[0]+4))
-    Zxx = interp(new_f)
+    # # Interpolate to make 114 steps for 2-30 Hz
+    # interp = interpolate.interp1d(f, Zxx, axis=2)
+    # new_f = np.linspace(0, f[-1], 2*(f.shape[0]+4))
+    # Zxx = interp(new_f)
+    new_f = f
     
     # Average estimates accross time dimension
     Zxx = np.mean(abs(Zxx), axis=3)
     
+    # Transform to dB power
+    print('Transform to dB')
+    Zxx = 10*np.log10(Zxx)
+    
     # Subtract the base spectrum (trials <= 5s)
     base = np.mean(Zxx[np.where(SLs<=5)[0], :, :], axis=0)
     Zxx = Zxx - base[np.newaxis, :, :]
+    
+    # Transform back 
+    # Zxx = 10 ** (Zxx/10)
     
     # Find intersecting values in frequency vector
     idx = np.logical_and(new_f >= low, new_f <= high)

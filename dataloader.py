@@ -51,7 +51,7 @@ def extract_data(data, events, i_file, diff_type):
         event_type = event[1]
         
         if event_type == diff_type:
-            X[iter_event,:,:] = data[:, event_time-2*sampling_rate:event_time]
+            X[iter_event,:,:] = data[:, event_time-2*sampling_rate+1:event_time+1]
             Y[iter_event] = int(events[i+1,0] - event_time)/sampling_rate
             iter_event += 1
             
@@ -244,6 +244,7 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
 
 if __name__ == '__main__':
     
+    # Test read_data
     X, Y_class, Y_reg, C = read_data([1], list(range(11)), pred_type='class')
     print('X shape: ', X.shape)
     
