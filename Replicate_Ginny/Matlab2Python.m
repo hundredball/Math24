@@ -16,6 +16,9 @@ for i_data = 1:size(data_list, 1)
     % Load data
     fileName = data_list{i_data};
     EEG = pop_loadset(['../Data_Matlab/' fileName '.set']);
+    
+    figure;
+    topoplot([],EEG.chanlocs,'style','blank','electrodes','labelpoint','chaninfo',EEG.chaninfo);
 
     % Get coordinate of channel in EEG
     radius_EEG = cell2mat({EEG.chanlocs.radius});
@@ -53,6 +56,10 @@ for i_data = 1:size(data_list, 1)
     chanlocs = EEG.chanlocs;
     save(['../Data_Python_Replicate/' fileName(1:6) '.mat'], 'data', 'event', 'chanlocs');
     fprintf([int2str(i_data) '. Save ' fileName(1:6) '.mat\n'])
+    
+    figure;
+    topoplot([],EEG.chanlocs,'style','blank','electrodes','labelpoint','chaninfo',EEG.chaninfo);
+    close all;
 end
 
 % Plot channel locations
