@@ -89,10 +89,11 @@ def STFT(data, SLs, low, high):
     f, t, Zxx = signal.stft(data, fs, nperseg = 512, noverlap = 512-3, axis=2)
     
     # # Interpolate to make 114 steps for 2-30 Hz
-    # interp = interpolate.interp1d(f, Zxx, axis=2)
-    # new_f = np.linspace(0, f[-1], 2*(f.shape[0]+4))
-    # Zxx = interp(new_f)
-    new_f = f
+    print('Interpolate')
+    interp = interpolate.interp1d(f, Zxx, axis=2)
+    new_f = np.linspace(0, f[-1], 2*(f.shape[0]+4))
+    Zxx = interp(new_f)
+    # new_f = f
     
     # Average estimates accross time dimension
     Zxx = np.mean(abs(Zxx), axis=3)

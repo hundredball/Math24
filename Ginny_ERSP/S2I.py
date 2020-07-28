@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib.tri as tri
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import time
 
 import dataloader
 import preprocessing
@@ -52,13 +53,16 @@ def generate_topo(bandpower):
     # Topoplot
     fileNames = np.empty(num_example, dtype=object)
     
+    start_time = time.time()
+    print('[%f] Generating topoplots...'%(start_time))
+    
     for i_data in range(num_example):
         
         # Plot topo for each band
         for i_band in range(3):
             fig, ax = plt.subplots(figsize=(4,4))
             n_angles = 48
-            n_radii = 1000
+            n_radii = 100
             radius = 0.9
             radii = np.linspace(0, radius, n_radii)
             angles = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
@@ -117,6 +121,8 @@ def generate_topo(bandpower):
         
         fileNames[i_data] = fileName
         
+    print('[%f] Finished all topoplots!'%(time.time()-start_time))
+        
     return fileNames
     
 def split(fileNames, SLs, test_ratio=0.1):
@@ -157,11 +163,14 @@ def split(fileNames, SLs, test_ratio=0.1):
     
     Y_test_df = pd.DataFrame({'solution_time':Y_test})
     Y_test_df.to_csv('./images/test_label.csv')
-
+    
+    print('Generate files for dataset referencing')
 
 if __name__ == '__main__':
     
     ERSP_all, tmp_all, freqs = dataloader.load_data()
+    
+    '''
     # Take first 7 samples
     ERSP_part, tmp_part = ERSP_all[:7,:,:,:], tmp_all[:7,:]
     ERSP_part, SLs = preprocessing.standardize(ERSP_part, tmp_part)
@@ -175,4 +184,15 @@ if __name__ == '__main__':
     
     # Test split
     split(fileNames, SLs, 0.2)
+    '''
+    
+    # Generate topoplot for all trials
+    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
+    theta = preprocessing.bandpower(ERSP_all, freqs, 4, 8)
+    alpha = preprocessing.bandpower(ERSP_all, freqs, 8, 14)
+    beta = preprocessing.bandpower(ERSP_all, freqs, 14, 30)
+    bandpower = np.concatenate((theta[:,:,np.newaxis], alpha[:,:,np.newaxis], beta[:,:,np.newaxis]), axis=2)
+    
+    fileNames = generate_topo(bandpower)
+    split(fileNames, SLs, 0.1)
     

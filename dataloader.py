@@ -9,6 +9,9 @@ Created on Thu May 14 18:36:33 2020
 import numpy as np
 import pandas as pd
 import scipy.io as sio
+import os,sys,inspect
+
+root_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
 def extract_data(data, events, i_file, diff_type):
     '''
@@ -125,7 +128,6 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         channel_limit = 12
         EEG_path = 'Data_Python_Replicate'
         coord_subFileName = '_channels_class.csv'
-    root_path = '/Users/hundredball/Desktop/Project_Predict/Math24/'
     
     # Get list of data names
     df_names = pd.read_csv('%s/Data_Matlab/data_list.csv'%(root_path))
