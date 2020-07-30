@@ -20,7 +20,7 @@ def undersampling(data, target):
     ----------
     data : 2d numpy array (epoch, features)
         All the samples from the original data
-    target : 1d numpy array 
+    target : nd numpy array 
         Solution latency
 
     Returns
@@ -31,12 +31,13 @@ def undersampling(data, target):
         New solution latency
 
     '''
-    assert isinstance(data, np.ndarray) and len(data.shape) == 2
-    assert isinstance(target, np.ndarray) and len(target.shape) == 1
+    assert isinstance(data, np.ndarray) and data.ndim==2
+    assert isinstance(target, np.ndarray) and target.shape[0]==target.size
     assert data.shape[0] == target.shape[0]
     
     # Use mean value as the threshold
     threshold = np.mean(target)
+    print('Undersampling threshold : %f'%(threshold))
     
     minor_index = np.where(target >= threshold)[0]
     major_index = np.where(target < threshold)[0]
@@ -47,6 +48,8 @@ def undersampling(data, target):
     # Generate new data
     new_data = np.concatenate((data[select_index, :], data[minor_index, :]), axis=0)
     new_target = np.concatenate((target[select_index], target[minor_index]), axis=0)
+    
+    print('> After undersampling: (%d,%d)'%(np.sum(new_target>=threshold), np.sum(new_target<threshold)))
     
     return new_data, new_target
 
@@ -69,12 +72,13 @@ def SMOTER(data, target):
         New solution latency
 
     '''
-    assert isinstance(data, np.ndarray) and len(data.shape) == 2
-    assert isinstance(target, np.ndarray) and len(target.shape) == 1
+    assert isinstance(data, np.ndarray) and data.ndim==2
+    assert isinstance(target, np.ndarray) and target.shape[0]==target.size
     assert data.shape[0] == target.shape[0]
     
     # Use mean value as the threshold
     threshold = np.mean(target)
+    print('SMOTER threshold : %f'%(threshold))
     
     minor_indices = np.where(target >= threshold)[0]
     major_indices = np.where(target < threshold)[0]
@@ -85,6 +89,8 @@ def SMOTER(data, target):
     num_new = int(np.ceil(len(major_indices)/len(minor_indices)) - 1)
     new_data = np.zeros((num_new*len(minor_indices), data.shape[1]))
     new_target = np.zeros(num_new*len(minor_indices))
+    if target.ndim == 2:
+        new_target = new_target.reshape((-1,1))
     
     # Generate synthetic samples
     neigh = NearestNeighbors(n_neighbors=6, radius=0.4)
@@ -111,7 +117,9 @@ def SMOTER(data, target):
     
     # Add original minor and major data
     new_data = np.concatenate((new_data, data), axis=0)
-    new_target = np.concatenate((new_target, target))
+    new_target = np.concatenate((new_target, target), axis=0)
+    
+    print('> After SMOTER: (%d,%d)'%(np.sum(new_target>=threshold), np.sum(new_target<threshold)))
     
     return new_data, new_target
 

@@ -32,7 +32,7 @@ def generate_topo(bandpower):
         file names of mixed images
 
     '''
-    assert isinstance(bandpower, np.ndarray) and len(bandpower.shape)==3
+    assert isinstance(bandpower, np.ndarray) and bandpower.ndim == 3
     assert bandpower.shape[1] == 12 and bandpower.shape[2] == 3
     
     # Read channel information
@@ -143,8 +143,8 @@ def split(fileNames, SLs, test_ratio=0.1):
     None.
 
     '''
-    assert isinstance(fileNames, np.ndarray) and len(fileNames.shape)==1
-    assert isinstance(SLs, np.ndarray) and len(SLs.shape)==1
+    assert isinstance(fileNames, np.ndarray) and fileNames.ndim == 1
+    assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
     assert isinstance(test_ratio, float) and (0<=test_ratio<=1)
     assert fileNames.shape[0] == SLs.shape[0]
     
@@ -187,6 +187,7 @@ if __name__ == '__main__':
     '''
     
     # Generate topoplot for all trials
+    ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, 25)
     ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
     theta = preprocessing.bandpower(ERSP_all, freqs, 4, 8)
     alpha = preprocessing.bandpower(ERSP_all, freqs, 8, 14)

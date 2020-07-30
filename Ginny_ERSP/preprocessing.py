@@ -27,8 +27,8 @@ def standardize(ERSP, tmp):
         solution latency of each trials
 
     '''
-    assert isinstance(ERSP, np.ndarray) and len(ERSP.shape)==4
-    assert isinstance(tmp, np.ndarray) and len(tmp.shape)==2
+    assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 4
+    assert isinstance(tmp, np.ndarray) and tmp.ndim == 2
     
     # Average over time
     ERSP = np.mean(ERSP, axis=3)
@@ -61,15 +61,15 @@ def bandpower(ERSP, freqs, low, high):
         mean ERSP
 
     '''
-    assert isinstance(ERSP, np.ndarray) and len(ERSP.shape)==3
-    assert isinstance(freqs, np.ndarray) and len(freqs.shape)==1
+    assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 3
+    assert isinstance(freqs, np.ndarray) and freqs.ndim == 1
     assert isinstance(low, int) and isinstance(high, int)
     assert high>=low
     
     index_freq = np.logical_and(freqs>low, freqs<high)
-    mean_ERSP = np.mean(ERSP[:,:,index_freq], axis=2)
+    bandpower = np.sum(ERSP[:,:,index_freq], axis=2)
     
-    return mean_ERSP
+    return bandpower
 
 def trimMean(ERSP_all, SLs, freqs):
     '''
@@ -92,9 +92,9 @@ def trimMean(ERSP_all, SLs, freqs):
         new solution latency
 
     '''
-    assert isinstance(ERSP_all, np.ndarray) and len(ERSP_all.shape)==3
-    assert isinstance(SLs, np.ndarray) and len(SLs.shape)==1
-    assert isinstance(freqs, np.ndarray) and len(freqs.shape)==1
+    assert isinstance(ERSP_all, np.ndarray) and ERSP_all.ndim == 3
+    assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
+    assert isinstance(freqs, np.ndarray) and freqs.ndim == 1
     
     num_channel = ERSP_all.shape[1]
 
@@ -154,7 +154,7 @@ def make_target(SLs, threshold=None):
         Second column: Solution latency
 
     '''
-    assert isinstance(SLs, np.ndarray) and len(SLs.shape)==1
+    assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
     
     if threshold is None:
         threshold = np.mean(SLs)
@@ -187,11 +187,11 @@ def PCA_corr(X_train, Y_train, X_test=None):
         testing data after PCA
     
     '''
-    assert isinstance(X_train, np.ndarray) and len(X_train.shape)==2
-    assert isinstance(Y_train, np.ndarray) and len(Y_train.shape)==2
+    assert isinstance(X_train, np.ndarray) and X_train.ndim == 2
+    assert isinstance(Y_train, np.ndarray) and Y_train.ndim == 2
     assert X_train.shape[0] == Y_train.shape[0]
     if X_test is not None:
-        assert isinstance(X_test, np.ndarray) and len(X_test.shape)==2
+        assert isinstance(X_test, np.ndarray) and X_test.ndim == 2
     
     # PCA fit
     num_train = X_train.shape[0]
@@ -234,6 +234,39 @@ def PCA_corr(X_train, Y_train, X_test=None):
         return X_train, X_test
     
     return X_train
+
+def remove_trials(ERSP_all, tmp_all, threshold):
+    '''
+    Remove trials with solution latency larger than threshold
+
+    Parameters
+    ----------
+    ERSP_all : nd numpy array (epoch, ...)
+        All data
+    tmp_all : 2d numpy array (epoch, time_periods)
+        time_periods include time points of fixation, cue, end
+    threshold : float or int
+        Threshold of removing trials
+    Returns
+    -------
+    ERSP_rem : 2d numpy array (epoch, features)
+        Data after removing trials
+    tmp_rem : 2d numpy array (epoch, time_periods)
+        time_periods include time points of fixation, cue, end after removing trials
+    
+    '''
+    assert isinstance(ERSP_all, np.ndarray)
+    assert isinstance(tmp_all, np.ndarray) and tmp_all.ndim == 2
+    assert isinstance(threshold, int) or isinstance(threshold, float)
+    assert threshold > 0
+    
+    # Remove trials with SLs >= 40
+    remove_indices = np.where(tmp_all[:,2]>=threshold)[0]
+    ERSP_rem = np.delete(ERSP_all, remove_indices, axis=0)
+    tmp_rem = np.delete(tmp_all, remove_indices, axis=0)
+    print('> Remove %d trials'%(tmp_all.shape[0]-tmp_rem.shape[0]))
+    
+    return ERSP_rem, tmp_rem
 
 if __name__ == '__main__':
     ERSP_all, tmp_all, freqs = dataloader.load_data()
