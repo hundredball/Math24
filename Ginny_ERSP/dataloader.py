@@ -48,9 +48,9 @@ def load_data():
     # ERSP_all (epoch, channel, freq_step, time_step)
     # tmp_all (epoch, time_periods)
     # freqs (freq_step)
-    print(ERSP_all.shape)
-    print(tmp_all.shape)
-    print(freqs.shape)
+    print('Shape of ERSP_all: ', ERSP_all.shape)
+    print('Shape of tmp_all: ', tmp_all.shape)
+    print('Shape of freqs: ', freqs.shape)
     
     return ERSP_all, tmp_all, freqs
     
