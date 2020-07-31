@@ -16,24 +16,31 @@ import time
 
 import dataloader
 import preprocessing
+import sampling
 
-def generate_topo(bandpower):
+def generate_topo(ERSP, freqs):
     '''
     Generate mixed topoplot
 
     Parameters
     ----------
-    bandpower : numpy 3d array 
-        (epoch, channel, band)
-
+    ERSP : numpy 3d array (epoch, channel, freq)
+        Event-related spectral perturbation
+    freqs : numpy 1d array
+        Frequency steps
     Returns
     -------
     fileNames : numpy 1d array (epoch)
         file names of mixed images
 
     '''
-    assert isinstance(bandpower, np.ndarray) and bandpower.ndim == 3
-    assert bandpower.shape[1] == 12 and bandpower.shape[2] == 3
+    assert isinstance(ERSP, np.ndarray) and ERSP.ndim==3
+    assert isinstance(freqs, np.ndarray) and freqs.ndim==1
+    
+    theta = preprocessing.bandpower(ERSP, freqs, 4, 8)
+    alpha = preprocessing.bandpower(ERSP, freqs, 8, 14)
+    beta = preprocessing.bandpower(ERSP, freqs, 14, 30)
+    bandpower = np.concatenate((theta[:,:,np.newaxis], alpha[:,:,np.newaxis], beta[:,:,np.newaxis]), axis=2)
     
     # Read channel information
     channel_info = pd.read_csv('Channel_location.csv')
@@ -54,7 +61,7 @@ def generate_topo(bandpower):
     fileNames = np.empty(num_example, dtype=object)
     
     start_time = time.time()
-    print('[%f] Generating topoplots...'%(start_time))
+    print('[%f] Generating topoplots...'%(time.time()-start_time))
     
     for i_data in range(num_example):
         
@@ -125,7 +132,7 @@ def generate_topo(bandpower):
         
     return fileNames
     
-def split(fileNames, SLs, test_ratio=0.1):
+def split(fileNames, SLs, test_size=0.1, random=True):
     '''
     Split training and testing set by creating csv files for referencing
 
@@ -145,11 +152,17 @@ def split(fileNames, SLs, test_ratio=0.1):
     '''
     assert isinstance(fileNames, np.ndarray) and fileNames.ndim == 1
     assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
-    assert isinstance(test_ratio, float) and (0<=test_ratio<=1)
+    assert isinstance(random, bool)
+    assert (random and isinstance(test_size, float) and 0<=test_size<=1) or\
+        ((not random) and isinstance(test_size, int) and 0<=test_size<=fileNames.shape[0])
     assert fileNames.shape[0] == SLs.shape[0]
     
     # Split for training and testing data
-    X_train, X_test, Y_train, Y_test = train_test_split(fileNames, SLs, test_size=test_ratio, random_state=42)
+    if not random:
+        X_train, X_test = fileNames[:-test_size], fileNames[-test_size:]
+        Y_train, Y_test = SLs[:-test_size], SLs[-test_size:]
+    else:
+        X_train, X_test, Y_train, Y_test = train_test_split(fileNames, SLs, test_size=test_size, random_state=42)
     
     # Save csv for dataloader
     X_train_df = pd.DataFrame({'fileName':X_train})
@@ -174,26 +187,39 @@ if __name__ == '__main__':
     # Take first 7 samples
     ERSP_part, tmp_part = ERSP_all[:7,:,:,:], tmp_all[:7,:]
     ERSP_part, SLs = preprocessing.standardize(ERSP_part, tmp_part)
-    theta = preprocessing.bandpower(ERSP_part, freqs, 4, 8)
-    alpha = preprocessing.bandpower(ERSP_part, freqs, 8, 14)
-    beta = preprocessing.bandpower(ERSP_part, freqs, 14, 30)
-    bandpower = np.concatenate((theta[:,:,np.newaxis], alpha[:,:,np.newaxis], beta[:,:,np.newaxis]), axis=2)
     
     # Test generate_topo
-    fileNames = generate_topo(bandpower)
+    fileNames = generate_topo(ERSP_part, freqs)
     
     # Test split
     split(fileNames, SLs, 0.2)
     '''
+    '''
     
-    # Generate topoplot for all trials
+    # -----Generate topoplot for all trials-----
+    
     ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, 25)
     ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
-    theta = preprocessing.bandpower(ERSP_all, freqs, 4, 8)
-    alpha = preprocessing.bandpower(ERSP_all, freqs, 8, 14)
-    beta = preprocessing.bandpower(ERSP_all, freqs, 14, 30)
-    bandpower = np.concatenate((theta[:,:,np.newaxis], alpha[:,:,np.newaxis], beta[:,:,np.newaxis]), axis=2)
     
-    fileNames = generate_topo(bandpower)
+    fileNames = generate_topo(ERSP_all, freqs)
     split(fileNames, SLs, 0.1)
+    '''
+    
+    # -----Generate topoplot after SMOTER-----
+    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
+    
+    # Split data
+    ERSP_train, ERSP_test, SLs_train, SLs_test = train_test_split(ERSP_all, SLs, test_size=0.1, random_state=42)
+    
+    # SMOTER on training data
+    ERSP_train = ERSP_train.reshape((ERSP_train.shape[0], -1))
+    ERSP_train, SLs_train = sampling.SMOTER(ERSP_train, SLs_train)
+    ERSP_train = ERSP_train.reshape((ERSP_train.shape[0], 12, -1))
+    
+    # Concatenate trainind and testing data
+    ERSP_concat = np.concatenate((ERSP_train, ERSP_test), axis=0)
+    SLs_concat = np.concatenate((SLs_train, SLs_test), axis=0)
+    
+    fileNames = generate_topo(ERSP_concat, freqs)
+    split(fileNames, SLs_concat, len(SLs_test), random = False)
     

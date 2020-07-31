@@ -15,51 +15,98 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data as Data
+import torchvision
+import torchvision.models as models
+import torchvision.transforms as transforms
 
 import dataloader
 import preprocessing
 import sampling
+import network_dataloader as ndl
 from mynet import mynet
 
 best_r2 = 0
 # select gpus
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
+
 num_epoch = 100
+model_name = 'vgg16'
+
 def main():
     global best_r2, device, num_epoch
     
-    # wrap up training and testing data
-    ERSP_all, tmp_all, freqs = dataloader.load_data()
-    # ERSP_all, SLs = preprocessing.remove_trials(ERSP_all, tmp_all, 25)  # Remove trials
-    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
-    ERSP_all = ERSP_all.reshape((ERSP_all.shape[0], -1))
+    torch.cuda.empty_cache()
     
-    train_data, test_data, train_target, test_target = train_test_split(ERSP_all, SLs.reshape((-1,1)), test_size=0.1)
-    
-    '''
-    # Undersampling
-    train_data, train_target = sampling.undersampling(train_data, train_target)
-    '''
-    
-    # SMOTER
-    train_data, train_target = sampling.SMOTER(train_data, train_target)
-    
-    
-    (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
-            torch.from_numpy, (train_data, train_target, test_data, test_target))
-    '''
-    [train_dataTS, train_targetTS, test_dataTS, test_targetTS] = [x.to(device=device) for x in [train_dataTS, train_targetTS, test_dataTS, test_targetTS]]
-    '''
-    [train_dataset,test_dataset] = map(\
-            Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
-    
-    batchSize = 32
-    train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
-    test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
+    # ------------- Wrap up dataloader -----------------
+    if model_name == 'mynet':
+        ERSP_all, tmp_all, freqs = dataloader.load_data()
+        # ERSP_all, SLs = preprocessing.remove_trials(ERSP_all, tmp_all, 25)  # Remove trials
+        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
+        ERSP_all = ERSP_all.reshape((ERSP_all.shape[0], -1))
 
-    # create model
-    model = mynet(ERSP_all.shape[1]).to(device=device)
+        train_data, test_data, train_target, test_target = train_test_split(ERSP_all, SLs.reshape((-1,1)), test_size=0.1)
+
+        '''
+        # Undersampling
+        train_data, train_target = sampling.undersampling(train_data, train_target)
+        '''
+
+        # SMOTER
+        train_data, train_target = sampling.SMOTER(train_data, train_target)
+
+
+        (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
+                torch.from_numpy, (train_data, train_target, test_data, test_target))
+        [train_dataset,test_dataset] = map(\
+                Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
+
+        batchSize = 32
+        train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
+        test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
+        
+    elif model_name == 'vgg16':
+        
+        input_size = 224
+        # Load Data
+        data_transforms = {
+                'train': transforms.Compose([
+                        ndl.Rescale(input_size),
+                        ndl.ToTensor()]), 
+                'test': transforms.Compose([
+                        ndl.Rescale(input_size),
+                        ndl.ToTensor()])
+                }
+
+        print("Initializing Datasets and Dataloaders...")
+
+        # Create training and testing datasets
+        image_datasets = {x: ndl.TopoplotLoader('images', x, data_transforms[x]) for x in ['train', 'test']}
+
+        # Create training and testing dataloaders
+        batchSize = 32
+        train_loader = Data.DataLoader(image_datasets['train'], batch_size=batchSize, shuffle=True, num_workers=4)
+        test_loader = Data.DataLoader(image_datasets['test'], batch_size=batchSize, shuffle=False, num_workers=4)
+        
+        
+    # ------------ Create model ---------------
+    if model_name == 'mynet':
+        model = mynet(ERSP_all.shape[1])
+    elif model_name == 'vgg16':
+        model = models.vgg16(pretrained=True, progress=True)
+        set_parameter_requires_grad(model, True)
+        
+        model.classifier[0] = nn.Linear(model.classifier[0].in_features, model.classifier[0].out_features)
+        model.classifier[1] = nn.Sigmoid()
+        model.classifier[3] = nn.Linear(model.classifier[3].in_features, model.classifier[3].out_features)
+        model.classifier[4] = nn.Sigmoid()
+        
+        model.classifier[6] = nn.Linear(model.classifier[6].in_features,1)
+        
+        
+    
+    # Run on GPU
+    model = model.to(device=device)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
 
@@ -68,8 +115,9 @@ def main():
     optimizer = torch.optim.SGD(model.parameters(), 0.001,
                                 momentum=0.9)
     
-    # Record loss and accuracy of each epoch
+    # ------------- Train model ------------------
     
+    # Record loss and accuracy of each epoch
     train_std = list(range(num_epoch))
     test_std = list(range(num_epoch))
     train_r2 = list(range(num_epoch))
@@ -113,7 +161,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
     model.train()
 
     end = time.time()
-    for i, (input, target) in enumerate(train_loader):
+    for i, sample in enumerate(train_loader):
+        
+        if model_name == 'mynet':
+            input, target = sample[0], sample[1]
+        elif model_name == 'vgg16':
+            input, target = sample['image'], sample['label']
+            target = target.view(-1,1)
+        
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -164,7 +219,14 @@ def validate(val_loader, model, criterion):
     model.eval()
 
     end = time.time()
-    for i, (input, target) in enumerate(val_loader):
+    for i, sample in enumerate(val_loader):
+        
+        if model_name == 'mynet':
+            input, target = sample[0], sample[1]
+        elif model_name == 'vgg16':
+            input, target = sample['image'], sample['label']
+            target = target.view(-1,1)
+        
         input = input.to(device=device)
         target = target.to(device=device)
         input_var = torch.autograd.Variable(input)
@@ -228,6 +290,11 @@ def cal_r2(output, target):
     r2 = r2_score(target, output)
     
     return r2
+
+def set_parameter_requires_grad(model, feature_extracting):
+    if feature_extracting:
+        for param in model.parameters():
+            param.requires_grad = False
 
 def plot_over_epoch(train, test, titleName=None, fileName=None):
     
