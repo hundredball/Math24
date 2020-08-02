@@ -103,7 +103,6 @@ def main():
         
         model.classifier[6] = nn.Linear(model.classifier[6].in_features,1)
         
-        
     
     # Run on GPU
     model = model.to(device=device)
@@ -112,8 +111,8 @@ def main():
 
     # define loss function (criterion) and optimizer
     criterion = nn.MSELoss().to(device=device)
-    optimizer = torch.optim.SGD(model.parameters(), 0.001,
-                                momentum=0.9)
+    #optimizer = torch.optim.SGD(model.parameters(), 0.001,momentum=0.9)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     
     # ------------- Train model ------------------
     
@@ -148,7 +147,7 @@ def main():
     
     # Save error over epochs
     dict_error = {'train_std': train_std, 'train_r2': train_r2, 'test_std': test_std, 'test_r2': test_r2}
-    with open('error.data', 'wb') as fp:
+    with open('VGG16_SMOTER_Sigmoid.data', 'wb') as fp:
         pickle.dump(dict_error, fp)
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -207,6 +206,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
                    batch_time=batch_time, data_time=data_time, loss=losses, top1=top1))
 
     print(' * Training r2@1 {top1.avg:.3f}'.format(top1=top1))
+    
+    del input
+    del target
+    torch.cuda.empty_cache()
 
     return top1.avg, (losses.avg)**0.5
 
@@ -255,6 +258,10 @@ def validate(val_loader, model, criterion):
                    top1=top1))
 
     print(' * Testing r2@1 {top1.avg:.3f}'.format(top1=top1))
+    
+    del input
+    del target
+    torch.cuda.empty_cache()
 
     return top1.avg, (losses.avg)**0.5
 

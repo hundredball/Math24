@@ -194,16 +194,17 @@ if __name__ == '__main__':
     # Test split
     split(fileNames, SLs, 0.2)
     '''
-    '''
     
+    '''
     # -----Generate topoplot for all trials-----
     
-    ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, 25)
+    # ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, 25)
     ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
     
     fileNames = generate_topo(ERSP_all, freqs)
     split(fileNames, SLs, 0.1)
     '''
+    
     
     # -----Generate topoplot after SMOTER-----
     ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
@@ -222,4 +223,5 @@ if __name__ == '__main__':
     
     fileNames = generate_topo(ERSP_concat, freqs)
     split(fileNames, SLs_concat, len(SLs_test), random = False)
+    
     
