@@ -31,7 +31,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
 num_epoch = 100
-model_name = 'vgg16'
+input_type = 'image'
 
 def main():
     global best_r2, device, num_epoch
@@ -39,7 +39,7 @@ def main():
     torch.cuda.empty_cache()
     
     # ------------- Wrap up dataloader -----------------
-    if model_name == 'mynet':
+    if input_type == 'signal':
         ERSP_all, tmp_all, freqs = dataloader.load_data()
         # ERSP_all, SLs = preprocessing.remove_trials(ERSP_all, tmp_all, 25)  # Remove trials
         ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
@@ -65,7 +65,7 @@ def main():
         train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
         test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
         
-    elif model_name == 'vgg16':
+    elif input_type == 'image':
         
         input_size = 224
         # Load Data
@@ -90,9 +90,9 @@ def main():
         
         
     # ------------ Create model ---------------
-    if model_name == 'mynet':
+    if input_type == 'signal':
         model = mynet(ERSP_all.shape[1])
-    elif model_name == 'vgg16':
+    elif input_type == 'image':
         model = models.vgg16(pretrained=True, progress=True)
         set_parameter_requires_grad(model, True)
         
@@ -162,9 +162,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
     for i, sample in enumerate(train_loader):
         
-        if model_name == 'mynet':
+        if input_type == 'signal':
             input, target = sample[0], sample[1]
-        elif model_name == 'vgg16':
+        elif input_type == 'image':
             input, target = sample['image'], sample['label']
             target = target.view(-1,1)
         
@@ -224,9 +224,9 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, sample in enumerate(val_loader):
         
-        if model_name == 'mynet':
+        if input_type == 'mynet':
             input, target = sample[0], sample[1]
-        elif model_name == 'vgg16':
+        elif input_type == 'image':
             input, target = sample['image'], sample['label']
             target = target.view(-1,1)
         
