@@ -9,7 +9,7 @@ Created on Sat Jul 11 10:28:06 2020
 import numpy as np
 import dataloader
 
-def standardize(ERSP, tmp):
+def standardize(ERSP, tmp, num_time=1):
     '''
     Average over time and subtract the base spectrum
 
@@ -19,9 +19,11 @@ def standardize(ERSP, tmp):
         ERSP of all trials
     tmp : 2d numpy array (epoch, time_periods)
         time_periods include time points of fixation, cue, end
+    num_time : int, optional
+        Number of time steps after standardizing. The default is 1.
     Returns
     -------
-    ERSP : 3d numpy array (epoch, channel, freq_step)
+    ERSP : 3d numpy array or 4d numpy array(epoch, channel, freq_step, (time))
         ERSP of all trials
     SLs : 1d numpy array (epoch)
         solution latency of each trials
@@ -29,16 +31,24 @@ def standardize(ERSP, tmp):
     '''
     assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 4
     assert isinstance(tmp, np.ndarray) and tmp.ndim == 2
+    assert isinstance(num_time, int) and num_time >= 1
+    assert ERSP.shape[3]%num_time == 0
     
+    time_step = int(ERSP.shape[3]/num_time)
     # Average over time
-    ERSP = np.mean(ERSP, axis=3)
-    
+    ERSP_avg = np.zeros((ERSP.shape[0],ERSP.shape[1],ERSP.shape[2],num_time))
+    for i_time in range(num_time):
+        ERSP_avg[:,:,:,i_time] = np.mean(ERSP[:,:,:, i_time*time_step:(i_time+1)*time_step], axis=3)
+
     # Subtract the base spectrum (trials <= 5s)
     SLs = tmp[:, 2]
-    base = np.mean(ERSP[np.where(SLs<=5)[0], :, :], axis=0)
-    ERSP = ERSP - base[np.newaxis, :, :]
-    
-    return ERSP, SLs
+    base = np.mean(ERSP_avg[np.where(SLs<=5)[0], :, :, :], axis=0)
+    ERSP_avg = ERSP_avg - base[np.newaxis, :, :, :]
+        
+    if num_time == 1:
+        ERSP_avg = np.squeeze(ERSP_avg, axis=3)
+        
+    return ERSP_avg, SLs
 
 def bandpower(ERSP, freqs, low, high):
     '''
@@ -269,8 +279,7 @@ def remove_trials(ERSP_all, tmp_all, threshold):
     return ERSP_rem, tmp_rem
 
 if __name__ == '__main__':
+    
     ERSP_all, tmp_all, freqs = dataloader.load_data()
     ERSP_all, SLs = standardize(ERSP_all, tmp_all)
-    new_ERSP, new_SLs = trimMean(ERSP_all, SLs, freqs)
     
-    Y = make_target(new_SLs)

@@ -24,22 +24,34 @@ import preprocessing
 import sampling
 import network_dataloader as ndl
 from mynet import mynet
+from RCNN import *
 
-best_r2 = 0
+best_std = 100
 # select gpus
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
-num_epoch = 100
-input_type = 'image'
+parser = argparse.ArgumentParser(description='Math24 project')
+parser.add_argument('-m', '--model_name', default='vgg16', help='Model for predicting solution latency')
+parser.add_argument('-i', '--input_type', default='image', help='Input type of the model')
+parser.add_argument('-e', '--num_epoch', default=100, help='Number of epochs')
+parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: none)')
+parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                    help='manual epoch number (useful on restarts)')
+parser.add_argument('-n', '--file_name', default = '', help='filename after model_name')
 
 def main():
-    global best_r2, device, num_epoch
+    global best_std, device, num_epoch, args
+    
+    args = parser.parse_args()
+    lr_step = [40, 70]
+    multiframe = ['convlstm', 'convfc']
     
     torch.cuda.empty_cache()
     
     # ------------- Wrap up dataloader -----------------
-    if input_type == 'signal':
+    if args.input_type == 'signal':
         ERSP_all, tmp_all, freqs = dataloader.load_data()
         # ERSP_all, SLs = preprocessing.remove_trials(ERSP_all, tmp_all, 25)  # Remove trials
         ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
@@ -65,23 +77,34 @@ def main():
         train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
         test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
         
-    elif input_type == 'image':
+    elif args.input_type == 'image':
         
-        input_size = 224
+        # Use multiframe input
+        if args.model_name in multiframe:
+            num_time = 20
+        else:
+            num_time = 1
+        
+        # Let input size be 224x224 if the model is vgg16
+        if args.model_name == 'vgg16':
+            input_size = 224
+        else:
+            input_size = 64
+            
         # Load Data
         data_transforms = {
                 'train': transforms.Compose([
-                        ndl.Rescale(input_size),
-                        ndl.ToTensor()]), 
+                        ndl.Rescale(input_size, num_time),
+                        ndl.ToTensor(num_time)]), 
                 'test': transforms.Compose([
-                        ndl.Rescale(input_size),
-                        ndl.ToTensor()])
+                        ndl.Rescale(input_size, num_time),
+                        ndl.ToTensor(num_time)])
                 }
 
         print("Initializing Datasets and Dataloaders...")
 
         # Create training and testing datasets
-        image_datasets = {x: ndl.TopoplotLoader('images', x, data_transforms[x]) for x in ['train', 'test']}
+        image_datasets = {x: ndl.TopoplotLoader('images', x, num_time, data_transforms[x]) for x in ['train', 'test']}
 
         # Create training and testing dataloaders
         batchSize = 32
@@ -90,9 +113,9 @@ def main():
         
         
     # ------------ Create model ---------------
-    if input_type == 'signal':
+    if args.model_name == 'mynet':
         model = mynet(ERSP_all.shape[1])
-    elif input_type == 'image':
+    elif args.model_name == 'vgg16':
         model = models.vgg16(pretrained=True, progress=True)
         set_parameter_requires_grad(model, True)
         
@@ -102,8 +125,15 @@ def main():
         model.classifier[4] = nn.Sigmoid()
         
         model.classifier[6] = nn.Linear(model.classifier[6].in_features,1)
+    elif args.model_name == 'convnet':
+        model = convnet(input_size)
+    elif args.model_name == 'convlstm':
+        model = convlstm(input_size, 64, 32, num_time)
+    elif args.model_name == 'convfc':
+        model = convfc(input_size, 32, num_time)
         
-    
+    print('Use model %s'%(args.model_name))
+        
     # Run on GPU
     model = model.to(device=device)
     if torch.cuda.device_count() > 1:
@@ -114,47 +144,63 @@ def main():
     #optimizer = torch.optim.SGD(model.parameters(), 0.001,momentum=0.9)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     
+    # Record loss and accuracy of each epoch
+    dict_std = {'train': list(range(args.num_epoch)), 'test': list(range(args.num_epoch))}
+    
+    # optionally resume from a checkpoint
+    if args.resume:
+        if os.path.isfile(args.resume):
+            print("=> loading checkpoint '{}'".format(args.resume))
+            checkpoint = torch.load(args.resume)
+            args.start_epoch = checkpoint['epoch']
+            best_std = checkpoint['best_std']
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            dict_std = checkpoint['dict_std']
+            print("=> loaded checkpoint '{}' (epoch {})"
+                  .format(args.resume, checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}'".format(args.resume))
+    
     # ------------- Train model ------------------
     
-    # Record loss and accuracy of each epoch
-    train_std = list(range(num_epoch))
-    test_std = list(range(num_epoch))
-    train_r2 = list(range(num_epoch))
-    test_r2 = list(range(num_epoch))
-    
-    for epoch in range(num_epoch):
+    for epoch in range(args.start_epoch, args.num_epoch):
+        
+        # Learning rate decay
+        if epoch in lr_step:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] *= 0.1
         
         # train for one epoch
-        train_r2[epoch], train_std[epoch] = train(train_loader, model, criterion, optimizer, epoch)
+        dict_std['train'][epoch] = train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
-        r2, test_std[epoch] = validate(test_loader, model, criterion)
-        test_r2[epoch] = r2
+        std = validate(test_loader, model, criterion)
+        dict_std['test'][epoch] = std
 
-        # remember best r2 and save checkpoint
-        is_best = r2 > best_r2
-        best_r2 = max(r2, best_r2)
+        # remember best standard error and save checkpoint
+        is_best = std < best_std
+        best_std = min(std, best_std)
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
-            'best_r2': best_r2,
+            'best_std': best_std,
             'optimizer': optimizer.state_dict(),
+            'dict_std': dict_std
         }, is_best)
         
         # Save best model
         if is_best:
-            torch.save(model.state_dict(), 'best_model.pt')
+            torch.save(model.state_dict(), './results/best_%s_%s.pt'%(args.model_name, args.file_name))
     
     # Save error over epochs
-    dict_error = {'train_std': train_std, 'train_r2': train_r2, 'test_std': test_std, 'test_r2': test_r2}
-    with open('VGG16_SMOTER_Sigmoid.data', 'wb') as fp:
-        pickle.dump(dict_error, fp)
+    with open('./results/%s_%s.data'%(args.model_name, args.file_name), 'wb') as fp:
+        pickle.dump(dict_std, fp)
 
 def train(train_loader, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
-    top1 = AverageMeter()
 
     # switch to train mode
     model.train()
@@ -162,9 +208,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
     for i, sample in enumerate(train_loader):
         
-        if input_type == 'signal':
+        if args.input_type == 'signal':
             input, target = sample[0], sample[1]
-        elif input_type == 'image':
+        elif args.input_type == 'image':
             input, target = sample['image'], sample['label']
             target = target.view(-1,1)
         
@@ -179,11 +225,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # compute output
         output = model(input_var)
         loss = criterion(output, target_var)
-
-        # measure accuracy and record loss
-        r2 = cal_r2(output.data, target)
         losses.update(loss.data.item(), input.size(0))
-        top1.update(r2, input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -200,23 +242,19 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'LR: {4}\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'r2@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                   epoch, num_epoch, i, len(train_loader), curr_lr,
-                   batch_time=batch_time, data_time=data_time, loss=losses, top1=top1))
-
-    print(' * Training r2@1 {top1.avg:.3f}'.format(top1=top1))
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
+                   epoch, args.num_epoch, i, len(train_loader), curr_lr,
+                   batch_time=batch_time, data_time=data_time, loss=losses))
     
     del input
     del target
     torch.cuda.empty_cache()
 
-    return top1.avg, (losses.avg)**0.5
+    return (losses.avg)**0.5
 
 def validate(val_loader, model, criterion):
     batch_time = AverageMeter()
     losses = AverageMeter()
-    top1 = AverageMeter()
 
     # switch to evaluate mode
     model.eval()
@@ -224,9 +262,9 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, sample in enumerate(val_loader):
         
-        if input_type == 'mynet':
+        if args.input_type == 'mynet':
             input, target = sample[0], sample[1]
-        elif input_type == 'image':
+        elif args.input_type == 'image':
             input, target = sample['image'], sample['label']
             target = target.view(-1,1)
         
@@ -241,9 +279,7 @@ def validate(val_loader, model, criterion):
         loss = criterion(output, target_var)
 
         # measure accuracy and record loss
-        r2 = cal_r2(output.data, target)
         losses.update(loss.data.item(), input.size(0))
-        top1.update(r2, input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -252,18 +288,14 @@ def validate(val_loader, model, criterion):
         if i % 1 == 0:
             print('Test: [{0}/{1}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'r2@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                   i, len(val_loader), batch_time=batch_time, loss=losses,
-                   top1=top1))
-
-    print(' * Testing r2@1 {top1.avg:.3f}'.format(top1=top1))
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
+                   i, len(val_loader), batch_time=batch_time, loss=losses))
     
     del input
     del target
     torch.cuda.empty_cache()
 
-    return top1.avg, (losses.avg)**0.5
+    return (losses.avg)**0.5
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -315,6 +347,3 @@ def plot_over_epoch(train, test, titleName=None, fileName=None):
 
 if __name__ == '__main__':
     main()
-
-    # (a) Final testing error: 0.8727
-    # (b) Final testing error: 0.6414
