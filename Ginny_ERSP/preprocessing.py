@@ -9,7 +9,7 @@ Created on Sat Jul 11 10:28:06 2020
 import numpy as np
 import dataloader
 
-def standardize(ERSP, tmp, num_time=1):
+def standardize(ERSP, tmp, num_time=1, train_indices=None):
     '''
     Average over time and subtract the base spectrum
 
@@ -21,6 +21,9 @@ def standardize(ERSP, tmp, num_time=1):
         time_periods include time points of fixation, cue, end
     num_time : int, optional
         Number of time steps after standardizing. The default is 1.
+    train_indices : 1d numpy array
+        Indices of training data. The default is None.
+        
     Returns
     -------
     ERSP : 3d numpy array or 4d numpy array(epoch, channel, freq_step, (time))
@@ -34,6 +37,9 @@ def standardize(ERSP, tmp, num_time=1):
     assert isinstance(num_time, int) and num_time >= 1
     assert ERSP.shape[3]%num_time == 0
     
+    if train_indices is None:
+        train_indices = np.array([True]*ERSP.shape[0])
+    
     time_step = int(ERSP.shape[3]/num_time)
     # Average over time
     ERSP_avg = np.zeros((ERSP.shape[0],ERSP.shape[1],ERSP.shape[2],num_time))
@@ -42,13 +48,70 @@ def standardize(ERSP, tmp, num_time=1):
 
     # Subtract the base spectrum (trials <= 5s)
     SLs = tmp[:, 2]
-    base = np.mean(ERSP_avg[np.where(SLs<=5)[0], :, :, :], axis=0)
+    train_ERSP_avg = ERSP_avg[train_indices,:,:,:]
+    base = np.mean(train_ERSP_avg[np.where(SLs[train_indices]<=5)[0], :, :, :], axis=0)
     ERSP_avg = ERSP_avg - base[np.newaxis, :, :, :]
         
     if num_time == 1:
         ERSP_avg = np.squeeze(ERSP_avg, axis=3)
         
     return ERSP_avg, SLs
+
+def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None):
+    '''
+    Select ERSP whose correlation with solution latency is larger than threshold
+    
+    Parameters
+    ----------
+    ERSP : 3d numpy array (epoch, channel, freq_step)
+        ERSP of all trials
+    SLs : 1d numpy array (epoch)
+        solution latency of each trials
+    threshold_corr : float
+        Threshold of correlation
+    train_indices : 1d numpy array
+        Indices of training data. The default is None.
+    
+    Returns
+    -------
+    select_ERSP : 2d numpy array (epoch, features)
+        ERSP of interest
+    select_indices : 1d numpy array 
+        Indices of selected feature, 0: discard, 1: select
+    
+    '''
+    assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 3
+    assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
+    assert isinstance(threshold_corr, float) and 0<=threshold_corr<=1
+    
+    if train_indices is None:
+        train_indices = np.array([True]*ERSP.shape[0])
+    
+    train_ERSP = ERSP[train_indices,:]
+    train_SLs = SLs[train_indices]
+    # Change the dimension of ERSP_all
+    ERSP_corr = train_ERSP.reshape((train_ERSP.shape[0],-1)).T
+    #print('Shape of ERSP_corr:', ERSP_corr.shape)
+    
+    # Make SLs the same shape as ERSP_all
+    SLs_corr = np.tile(train_SLs, (ERSP_corr.shape[0], 1))
+    #print('Shape of SLs_corr: ', SLs_corr.shape)
+    
+    # Calculate the correlation matrix
+    corr_mat = np.corrcoef(ERSP_corr, SLs_corr)
+    corr_ERSP_SLs = corr_mat[:1368, 1368]
+    #print('Shape of corr_ERSP_SLs: ', corr_ERSP_SLs.shape)
+    
+    # Select interested ERSP
+    abs_corr = abs(corr_ERSP_SLs)
+    select_indices = np.zeros(abs_corr.shape)
+    select_indices[abs_corr >= np.quantile(abs_corr, 0.75)] = 1
+    
+    select_ERSP = ERSP.reshape((ERSP.shape[0],-1))[:, select_indices==1]
+    #print(select_ERSP.shape)
+    print('Select %d features'%(np.sum(select_indices)))
+    
+    return select_ERSP, select_indices
 
 def bandpower(ERSP, freqs, low, high):
     '''
@@ -184,9 +247,8 @@ def PCA_corr(X_train, Y_train, X_test=None):
     ----------
     X_train : 2d numpy array (epoch, features)
         training data
-    Y_train : 2d numpy array (epoch, type)
-        First column: Classification label
-        Second column: Solution latency
+    Y_train : 1d numpy array (epoch)
+        Solution latency
     X_test : 2d numpy array (epoch, features)
         testing data, default=None
     Returns
@@ -198,7 +260,7 @@ def PCA_corr(X_train, Y_train, X_test=None):
     
     '''
     assert isinstance(X_train, np.ndarray) and X_train.ndim == 2
-    assert isinstance(Y_train, np.ndarray) and Y_train.ndim == 2
+    assert isinstance(Y_train, np.ndarray) and Y_train.ndim == 1
     assert X_train.shape[0] == Y_train.shape[0]
     if X_test is not None:
         assert isinstance(X_test, np.ndarray) and X_test.ndim == 2
@@ -226,16 +288,17 @@ def PCA_corr(X_train, Y_train, X_test=None):
     # Find two PCs correlated most strongly with SLs
     corr_coef = np.zeros(num_PCs)
     for i in range(num_PCs):
-        corr_coef[i] = abs(np.corrcoef(X_train[:,i], Y_train[:,1])[0,1])
+        corr_coef[i] = abs(np.corrcoef(X_train[:,i], Y_train)[0,1])
 
-    #print(corr_coef)
     max_1_index = np.argmax(corr_coef)
-    #print('Max: ', max_1_index)
+    print('First: %d, %f'%(max_1_index, np.max(corr_coef)))
+
     corr_coef[max_1_index] = 0
     max_2_index = np.argmax(corr_coef)
-    #print('Second: ', max_2_index)
+    print('Second: %d, %f'%(max_2_index, np.max(corr_coef)))
+    
     PC_2 = sorted_v[:, [max_1_index, max_2_index]]
-
+    
 
     # PCA predict
     X_train = abs(np.dot(cen_X_train, PC_2))
@@ -282,4 +345,6 @@ if __name__ == '__main__':
     
     ERSP_all, tmp_all, freqs = dataloader.load_data()
     ERSP_all, SLs = standardize(ERSP_all, tmp_all)
+    
+    select_ERSP, select_indices = select_correlated_ERSP(ERSP_all, SLs)
     
