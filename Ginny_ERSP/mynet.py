@@ -7,17 +7,16 @@ class MyNet(nn.Module):
 
     def __init__(self, in_features):
         super(MyNet, self).__init__()
-        self.act = nn.Sigmoid()
         self.fc1 = nn.Linear(in_features, 100)
-        self.fc2 = nn.Linear(100, 100)
-        self.fc3 = nn.Linear(100, 1)
+        self.fc2 = nn.Linear(100, 50)
+        self.fc3 = nn.Linear(50, 30)
+        self.fc4 = nn.Linear(30, 1)
 
     def forward(self, x):
         x = self.fc1(x)
-        x = self.act(x)
         x = self.fc2(x)
-        x = self.act(x)
         x = self.fc3(x)
+        x = self.fc4(x)
 
         return x
 

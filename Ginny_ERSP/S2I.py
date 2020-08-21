@@ -209,6 +209,36 @@ def split(fileNames, SLs, test_size=0.1, random=True):
     Y_test_df.to_csv('./images/test_label.csv')
     
     print('Generate files for dataset referencing')
+    
+def S2I_main(ERSP_all, tmp_all, freqs, indices, mode):
+    
+    if mode == 'multiframe':
+        num_time = 20
+    else:
+        num_time = 1
+    
+    # Standardize the data
+    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'])
+    ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
+    SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}
+    
+    if mode == 'SMOTE':
+        num_train = ERSP_dict['train'].shape[0]
+        ERSP_dict['train'] = ERSP_dict['train'].reshape((num_train, -1))
+        ERSP_dict['train'], SLs_dict['train'] = sampling.SMOTER(ERSP_dict['train'], SLs_dict['train'])
+        ERSP_dict['train'] = ERSP_dict['train'].reshape((num_train, 12, -1))
+    
+    # Concatenate training and testing data
+    ERSP_concat = np.concatenate((ERSP_dict['train'], ERSP_dict['test']), axis=0)
+    SLs_concat = np.concatenate((SLs_dict['train'], SLs_dict['test']), axis=0)
+    
+    start_time = time.time()
+    print('[%.1f] Signal to image (%s)'%(time.time()-start_time, mode))
+    
+    fileNames = generate_topo(ERSP_concat, freqs, num_time)
+    split(fileNames, SLs_concat, len(SLs_dict['test']), random = False)
+    
+    print('[%.1f] Finish S2I'%(time.time()-start_time))
 
 if __name__ == '__main__':
     
@@ -216,42 +246,42 @@ if __name__ == '__main__':
     
     ERSP_all, tmp_all, freqs = dataloader.load_data()
     
+    ERSP_all, tmp_all = ERSP_all[:10, :], tmp_all[:10, :]
+    
+    # Split data
+    indices = {}
+    indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
+    
+    S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode)
+    
     '''
-    # Take first 7 samples
-    ERSP_part, tmp_part = ERSP_all[:7,:,:,:], tmp_all[:7,:]
-    ERSP_part, SLs = preprocessing.standardize(ERSP_part, tmp_part)
-    
-    # Test generate_topo
-    fileNames = generate_topo(ERSP_part, freqs)
-    
-    # Test split
-    split(fileNames, SLs, 0.2)
-    '''
-    
-    print('Signal to image (%s)'%(args.mode))
     # -----Generate topoplot for all trials-----
     if args.mode == 'normal':
         
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
+        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices=indices['train'])
+        ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
+        SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}
+        
+        # Concatenate training and testing data
+        ERSP_concat = np.concatenate((ERSP_dict['train'], ERSP_dict['test']), axis=0)
+        SLs_concat = np.concatenate((SLs_dict['train'], SLs_dict['test']), axis=0)
 
-        fileNames = generate_topo(ERSP_all, freqs)
-        split(fileNames, SLs, 0.1)
-    
+        fileNames = generate_topo(ERSP_concat, freqs)
+        split(fileNames, SLs_concat, len(SLs_dict['test']), random=False)
     
     # -----Generate topoplot after SMOTER-----
     elif args.mode == 'SMOTE':
         
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
-
-        # Split data
-        ERSP_train, ERSP_test, SLs_train, SLs_test = train_test_split(ERSP_all, SLs, test_size=0.1, random_state=42)
+        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices=indices['train'])
+        ERSP_train, ERSP_test = ERSP_all[indices['train'],:], ERSP_all[indices['test'],:]
+        SLs_train, SLs_test = SLs[indices['train']], SLs[indices['test']]
 
         # SMOTER on training data
         ERSP_train = ERSP_train.reshape((ERSP_train.shape[0], -1))
         ERSP_train, SLs_train = sampling.SMOTER(ERSP_train, SLs_train)
         ERSP_train = ERSP_train.reshape((ERSP_train.shape[0], 12, -1))
 
-        # Concatenate trainind and testing data
+        # Concatenate training and testing data
         ERSP_concat = np.concatenate((ERSP_train, ERSP_test), axis=0)
         SLs_concat = np.concatenate((SLs_train, SLs_test), axis=0)
 
@@ -261,9 +291,9 @@ if __name__ == '__main__':
     elif args.mode == 'multiframe':
         
         num_time = 20
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time)
+        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'])
         
         fileNames = generate_topo(ERSP_all, freqs, num_time)
         split(fileNames, SLs, 0.1)
-    
+    '''
     

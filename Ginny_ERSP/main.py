@@ -8,6 +8,7 @@ import pickle
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
+from sklearn.decomposition import PCA
 
 import torch
 import torch.nn as nn
@@ -34,7 +35,7 @@ print(device)
 parser = argparse.ArgumentParser(description='Math24 project')
 parser.add_argument('-m', '--model_name', default='vgg16', help='Model for predicting solution latency')
 parser.add_argument('-i', '--input_type', default='image', help='Input type of the model')
-parser.add_argument('-e', '--num_epoch', default=100, help='Number of epochs')
+parser.add_argument('-e', '--num_epoch', default=100, type=int, help='Number of epochs')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
@@ -53,20 +54,34 @@ def main():
     # ------------- Wrap up dataloader -----------------
     if args.input_type == 'signal':
         ERSP_all, tmp_all, freqs = dataloader.load_data()
-        # ERSP_all, SLs = preprocessing.remove_trials(ERSP_all, tmp_all, 25)  # Remove trials
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all)
+        
+        # Set split indices
+        indices = {}
+        indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
+        
+        # Standardize data
+        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices = indices['train'])
         ERSP_all = ERSP_all.reshape((ERSP_all.shape[0], -1))
-
-        train_data, test_data, train_target, test_target = train_test_split(ERSP_all, SLs.reshape((-1,1)), test_size=0.1)
+        
+        
+        # Split data
+        train_data, test_data = tuple([ ERSP_all[indices[kind],:] for kind in ['train','test'] ])
+        train_target, test_target = tuple([ SLs[indices[kind]].reshape((-1,1)) for kind in ['train','test'] ])
+        
+        # PCA Transform
+        pca = PCA(n_components=0.9)
+        pca.fit(train_data)
+        train_data = pca.transform(train_data)
+        test_data = pca.transform(test_data)
 
         '''
         # Undersampling
         train_data, train_target = sampling.undersampling(train_data, train_target)
-        '''
+        
 
         # SMOTER
         train_data, train_target = sampling.SMOTER(train_data, train_target)
-
+        '''
 
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
@@ -114,7 +129,7 @@ def main():
         
     # ------------ Create model ---------------
     if args.model_name == 'mynet':
-        model = mynet(ERSP_all.shape[1])
+        model = mynet(train_data.shape[1])
     elif args.model_name == 'vgg16':
         model = models.vgg16(pretrained=True, progress=True)
         set_parameter_requires_grad(model, True)
@@ -262,7 +277,7 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, sample in enumerate(val_loader):
         
-        if args.input_type == 'mynet':
+        if args.input_type == 'signal':
             input, target = sample[0], sample[1]
         elif args.input_type == 'image':
             input, target = sample['image'], sample['label']
