@@ -17,8 +17,9 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
     ----------
     ERSP : 4d numpy array (epoch, channel, freq_step, time_step)
         ERSP of all trials
-    tmp : 2d numpy array (epoch, time_periods)
-        time_periods include time points of fixation, cue, end
+    tmp : 2d numpy array (epoch, time_periods) or 1d numpy array (epoch)
+        2d : time_periods include time points of fixation, cue, end
+        1d : solution latency
     num_time : int, optional
         Number of time steps after standardizing. The default is 1.
     train_indices : 1d numpy array
@@ -33,7 +34,7 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
 
     '''
     assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 4
-    assert isinstance(tmp, np.ndarray) and tmp.ndim == 2
+    assert isinstance(tmp, np.ndarray) and (tmp.ndim == 2 or tmp.ndim == 1)
     assert isinstance(num_time, int) and num_time >= 1
     assert ERSP.shape[3]%num_time == 0
     
@@ -47,7 +48,10 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
         ERSP_avg[:,:,:,i_time] = np.mean(ERSP[:,:,:, i_time*time_step:(i_time+1)*time_step], axis=3)
 
     # Subtract the base spectrum (trials <= 5s)
-    SLs = tmp[:, 2]
+    if tmp.ndim == 2:
+        SLs = tmp[:, 2]
+    else:
+        SLs = tmp
     train_ERSP_avg = ERSP_avg[train_indices,:,:,:]
     base = np.mean(train_ERSP_avg[np.where(SLs[train_indices]<=5)[0], :, :, :], axis=0)
     ERSP_avg = ERSP_avg - base[np.newaxis, :, :, :]
@@ -99,7 +103,8 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
     
     # Calculate the correlation matrix
     corr_mat = np.corrcoef(ERSP_corr, SLs_corr)
-    corr_ERSP_SLs = corr_mat[:1368, 1368]
+    #print(corr_mat.shape)
+    corr_ERSP_SLs = corr_mat[:ERSP_corr.shape[0], ERSP_corr.shape[0]]
     #print('Shape of corr_ERSP_SLs: ', corr_ERSP_SLs.shape)
     
     # Select interested ERSP

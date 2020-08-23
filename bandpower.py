@@ -7,6 +7,8 @@ Created on Fri May 15 11:52:20 2020
 """
 
 import numpy as np
+import pandas as pd
+import pickle
 from scipy import signal
 from scipy import interpolate
 from scipy.integrate import simps
@@ -58,9 +60,9 @@ def get_bandpower(data, low = [4,7,13], high=[7,13,30]):
 
     return powers
 
-def STFT(data, SLs, low, high):
+def STFT(data, SLs, channels, low, high):
     '''
-    Adopt STFT to data
+    Order the channels, then adopt STFT to data to get ERSP, and finally save it
 
     Parameters
     ----------
@@ -70,6 +72,8 @@ def STFT(data, SLs, low, high):
         k : sample
     SLs : numpy 1D array
         solution latency of each data
+    channels : numpy 1D array
+        Number of channel file
     low : int
         Lower frequency bound
     high : int
@@ -77,37 +81,69 @@ def STFT(data, SLs, low, high):
 
     Returns
     -------
-    None.
+    new_f : numpy 1d array
+        Frequency steps of ERSP
+    t : numpy 1d array
+        Time steps of ERSP
+    Zxx : numpy 4d array (epoch, channel, freq, time)
+        Event related spectral perturbation
 
     '''
 
-    assert isinstance(data, np.ndarray)
-    assert isinstance(SLs, np.ndarray)
+    assert isinstance(data, np.ndarray) and data.ndim == 3
+    assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
+    assert isinstance(channels, np.ndarray) and channels.ndim == 1
     assert isinstance(low, int) and isinstance(high, int)
     assert (high >= low >= 0)
     
+    print('--- Arrange all the channels as the same order ---\n')
+    # Get list of data names
+    df_names = pd.read_csv('./Data_Matlab/data_list.csv')
+    data_names = [x[0:6] for x in df_names.values.flatten()]
+    
+    # Order of channels
+    channel_order = pd.read_csv('./Channel_coordinate/Channel_location_angle.csv')['Channel'].values
+    
+    # Arrange all the channels in the same order
+    for i in range(data.shape[0]):
+        date = channels[i]
+    
+        # Read channel locations
+        channel_info = pd.read_csv('./Channel_coordinate/%s_channels_class.csv'%(data_names[date]))
+        channel_info = channel_info.to_numpy()
+        
+        # Change the order of data
+        temp_X = np.array([data[i, np.where(channel_order[j]==channel_info[:,1])[0],:] for j in range(data.shape[1])])
+        temp_X = temp_X.reshape((data.shape[1], -1))
+        data[i,:] = temp_X
+    
+    print('--- STFT ---\n')
     f, t, Zxx = signal.stft(data, fs, nperseg = 512, noverlap = 512-3, axis=2)
     
-    # # Interpolate to make 114 steps for 2-30 Hz
+    '''
+    # Interpolate to make 114 steps for 2-30 Hz
     print('Interpolate')
     interp = interpolate.interp1d(f, Zxx, axis=2)
     new_f = np.linspace(0, f[-1], 2*(f.shape[0]+4))
     Zxx = interp(new_f)
-    # new_f = f
+    '''
+    new_f = f
     
-    # Average estimates accross time dimension
-    Zxx = np.mean(abs(Zxx), axis=3)
+    # Remove imaginary part
+    Zxx = abs(Zxx)
     
     # Transform to dB power
     print('Transform to dB')
     Zxx = 10*np.log10(Zxx)
     
+    '''
     # Subtract the base spectrum (trials <= 5s)
     base = np.mean(Zxx[np.where(SLs<=5)[0], :, :], axis=0)
     Zxx = Zxx - base[np.newaxis, :, :]
     
     # Transform back 
     # Zxx = 10 ** (Zxx/10)
+    '''
     
     # Find intersecting values in frequency vector
     idx = np.logical_and(new_f >= low, new_f <= high)
@@ -117,19 +153,18 @@ def STFT(data, SLs, low, high):
     new_f = new_f[idx]
     Zxx = Zxx[:,:,idx]
     
+    # Save to pickle file
+    dict_ERSP = {'freq':new_f, 't':t, 'ERSP':Zxx, 'SLs':SLs}
+    with open('./ERSP_from_raw.data', 'wb') as fp:
+        pickle.dump(dict_ERSP, fp)
+    
     return new_f, t, Zxx
 
 if __name__ == '__main__':
     
-    X, Y_class, Y_reg, channels = dl.read_data([2], list(range(11)), 'class')
+    X, Y_class, Y_reg, channels = dl.read_data([1,2,3], list(range(11)), 'class')
     
-    # Test get_bandpower
-    powers = get_bandpower(X, [2], [30])
-    print(powers.shape)
+    # Adopt STFT and save file
+    freq, t, Zxx  = STFT(X, Y_reg, channels, 2, 30)
     
-    # print('Absolute theta power: %.3f uV^2' % powers[525, 12, 0])
-    # print('Absolute alpha power: %.3f uV^2' % powers[525, 12, 1])
-    # print('Absolute beta power: %.3f uV^2' % powers[525, 12, 2])
     
-    # Test STFT
-    freq, t, Zxx  = STFT(X, Y_reg, 2, 30)

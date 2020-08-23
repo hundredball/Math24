@@ -247,6 +247,6 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
 if __name__ == '__main__':
     
     # Test read_data
-    X, Y_class, Y_reg, C = read_data([1], list(range(11)), pred_type='class')
+    X, Y_class, Y_reg, C = read_data([1,2,3], list(range(11)), pred_type='class')
     print('X shape: ', X.shape)
     

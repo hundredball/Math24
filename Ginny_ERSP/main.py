@@ -41,6 +41,8 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('-n', '--file_name', default = '', help='filename after model_name')
+parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
+
 
 def main():
     global best_std, device, num_epoch, args
@@ -53,7 +55,12 @@ def main():
     
     # ------------- Wrap up dataloader -----------------
     if args.input_type == 'signal':
-        ERSP_all, tmp_all, freqs = dataloader.load_data()
+        if args.data_cate == 1:
+            ERSP_all, tmp_all, freqs = dataloader.load_data()
+        elif args.data_cate == 2:
+            with open('./ERSP_from_raw.data', 'rb') as fp:
+                dict_ERSP = pickle.load(fp)
+            ERSP_all, tmp_all = dict_ERSP['ERSP'], dict_ERSP['SLs']
         
         # Set split indices
         indices = {}
@@ -62,7 +69,6 @@ def main():
         # Standardize data
         ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices = indices['train'])
         ERSP_all = ERSP_all.reshape((ERSP_all.shape[0], -1))
-        
         
         # Split data
         train_data, test_data = tuple([ ERSP_all[indices[kind],:] for kind in ['train','test'] ])
@@ -131,7 +137,7 @@ def main():
     if args.model_name == 'mynet':
         model = mynet(train_data.shape[1])
     elif args.model_name == 'vgg16':
-        model = models.vgg16(pretrained=True, progress=True)
+        model = models.vgg16(pretrained=True)
         set_parameter_requires_grad(model, True)
         
         model.classifier[0] = nn.Linear(model.classifier[0].in_features, model.classifier[0].out_features)
@@ -211,6 +217,9 @@ def main():
     # Save error over epochs
     with open('./results/%s_%s.data'%(args.model_name, args.file_name), 'wb') as fp:
         pickle.dump(dict_std, fp)
+        
+    # Plot error curve
+    plot_std(dict_std['train'], dict_std['test'], '%s_%s'%(args.model_name, args.file_name))
 
 def train(train_loader, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
@@ -350,15 +359,35 @@ def set_parameter_requires_grad(model, feature_extracting):
         for param in model.parameters():
             param.requires_grad = False
 
-def plot_over_epoch(train, test, titleName=None, fileName=None):
+def plot_std(train, test, fileName=None):
+    '''
+    Plot the standard error curve of training and testing data
+
+    Parameters
+    ----------
+    train : iterator
+        Training standard error
+    test : itertor
+        Testing standard error
+    fileName : string, optional
+        Name for file and title
+
+    Returns
+    -------
+    None.
+
+    '''
+    assert hasattr(train, __iter__)
+    assert hasattr(test, __iter__)
     
-    epochs = list(range(len(train)))
-    plt.plot(epochs, train, 'r-', epochs, test, 'b--')
-    plt.legend(('Training', 'Testing'))
-    plt.title(titleName)
+    epoch = list(range(len(train)))
+    plt.plot(epoch, train, 'r-', epoch, test, 'b--')
     plt.xlabel('Epoch')
-    plt.ylabel(titleName.split(' ')[0])
-    plt.savefig('./images/%s'%(fileName))
+    plt.ylabel('Standard error')
+    plt.title('%s : (%.3f,%.3f)'%(fileName, min(train), min(test)))
+    plt.legend(('Train', 'Test'))
+    
+    plt.savefig('./results/%s.png'%(fileName))
 
 if __name__ == '__main__':
     main()

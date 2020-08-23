@@ -22,6 +22,7 @@ import sampling
 
 parser = argparse.ArgumentParser(description='Signal to image')
 parser.add_argument('-m', '--mode', default='normal', help='Generating method')
+parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
 
 
 def generate_topo(ERSP, freqs, num_time=1):
@@ -211,9 +212,35 @@ def split(fileNames, SLs, test_size=0.1, random=True):
     print('Generate files for dataset referencing')
     
 def S2I_main(ERSP_all, tmp_all, freqs, indices, mode):
+    '''
+    Standardize data, then generate topo
+
+    Parameters
+    ----------
+    ERSP_all : numpy 4d array
+        Event related spectral perturbations
+    tmp_all : numpy 1d or 2d array
+        Periods of time or solution latency
+    freqs : numpy 1d array
+        Frequency steps
+    indices : dict
+        Indices of training and testing data
+    mode : string
+        Multiframe or single frame or SMOTE
+
+    Returns
+    -------
+    None.
+
+    '''
+    assert isinstance(ERSP_all, np.ndarray) and ERSP_all.ndim == 4
+    assert isinstance(tmp_all, np.ndarray) and (tmp_all.ndim == 1 or tmp_all.ndim == 2)
+    assert isinstance(freqs, np.ndarray) and freqs.ndim == 1
+    assert isinstance(indices, dict)
+    assert isinstance(mode, str)
     
     if mode == 'multiframe':
-        num_time = 20
+        num_time = 19
     else:
         num_time = 1
     
@@ -243,57 +270,18 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode):
 if __name__ == '__main__':
     
     args = parser.parse_args()
+    if args.data_cate == 1:
+        ERSP_all, tmp_all, freqs = dataloader.load_data()
+    elif args.data_cate == 2:
+        with open('./ERSP_from_raw.data', 'rb') as fp:
+            dict_ERSP = pickle.load(fp)
+        ERSP_all, tmp_all, freqs = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq']
+        print('Shape of ERSP_all: ', ERSP_all.shape)
     
-    ERSP_all, tmp_all, freqs = dataloader.load_data()
-    
-    ERSP_all, tmp_all = ERSP_all[:10, :], tmp_all[:10, :]
     
     # Split data
     indices = {}
     indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
     
     S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode)
-    
-    '''
-    # -----Generate topoplot for all trials-----
-    if args.mode == 'normal':
-        
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices=indices['train'])
-        ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
-        SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}
-        
-        # Concatenate training and testing data
-        ERSP_concat = np.concatenate((ERSP_dict['train'], ERSP_dict['test']), axis=0)
-        SLs_concat = np.concatenate((SLs_dict['train'], SLs_dict['test']), axis=0)
-
-        fileNames = generate_topo(ERSP_concat, freqs)
-        split(fileNames, SLs_concat, len(SLs_dict['test']), random=False)
-    
-    # -----Generate topoplot after SMOTER-----
-    elif args.mode == 'SMOTE':
-        
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices=indices['train'])
-        ERSP_train, ERSP_test = ERSP_all[indices['train'],:], ERSP_all[indices['test'],:]
-        SLs_train, SLs_test = SLs[indices['train']], SLs[indices['test']]
-
-        # SMOTER on training data
-        ERSP_train = ERSP_train.reshape((ERSP_train.shape[0], -1))
-        ERSP_train, SLs_train = sampling.SMOTER(ERSP_train, SLs_train)
-        ERSP_train = ERSP_train.reshape((ERSP_train.shape[0], 12, -1))
-
-        # Concatenate training and testing data
-        ERSP_concat = np.concatenate((ERSP_train, ERSP_test), axis=0)
-        SLs_concat = np.concatenate((SLs_train, SLs_test), axis=0)
-
-        fileNames = generate_topo(ERSP_concat, freqs)
-        split(fileNames, SLs_concat, len(SLs_test), random = False)
-        
-    elif args.mode == 'multiframe':
-        
-        num_time = 20
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'])
-        
-        fileNames = generate_topo(ERSP_all, freqs, num_time)
-        split(fileNames, SLs, 0.1)
-    '''
     
