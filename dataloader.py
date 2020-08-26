@@ -37,6 +37,8 @@ def extract_data(data, events, i_file, diff_type):
         k : sample
     Y : numpy 1D array
         solution latency of example
+    C : numpy 1D array
+        Indices of channel file
 
     '''
     assert isinstance(diff_type, str)
@@ -135,9 +137,9 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
     data_names = [data_names[i] for i in date]
     
     # Iterate over each files
-    X_list_diff_date = [[] for x in range(3)]   # Data
-    Y_list_diff_date = [[] for x in range(3)]   # Labels
-    C_list_diff_date = [[] for x in range(3)]   # Channel info
+    X_list_diff_date = [[] for x in range(len(diff_type))]   # Data
+    Y_list_diff_date = [[] for x in range(len(diff_type))]   # Labels
+    C_list_diff_date = [[] for x in range(len(diff_type))]   # Channel info
     
     for i_file, fileName in enumerate(data_names):
         EEG = sio.loadmat('%s/%s/%s.mat'%(root_path, EEG_path, fileName))
@@ -153,9 +155,9 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         chan_label, chan_theta, chan_arc_length = [], [], []
         
         for i in range(num_channel):
-            chan_label.append(chanlocs[0,i][0][0])
-            chan_theta.append(chanlocs[0,i][1][0,0])
-            chan_arc_length.append(chanlocs[0,i][2][0,0])
+            chan_label.append(chanlocs['labels'][0,i][0])
+            chan_theta.append(chanlocs['theta'][0,i][0,0])
+            chan_arc_length.append(chanlocs['radius'][0,i][0,0])
             
         # create dataframe for them
         '''
@@ -168,22 +170,15 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         channels = pd.DataFrame(data=d)
         channels.to_csv('%s/Channel_coordinate/%s'%(root_path, fileName+coord_subFileName))
         
-        X1, Y1, C1 = extract_data(data, events, i_file, '1')
-        X2, Y2, C2 = extract_data(data, events, i_file, '2')
-        X3, Y3, C3 = extract_data(data, events, i_file, '3')
-                
-        X_list_diff_date[0].append(X1.copy())
-        Y_list_diff_date[0].append(Y1.copy())
-        C_list_diff_date[0].append(C1.copy())
         
-        X_list_diff_date[1].append(X2.copy())
-        Y_list_diff_date[1].append(Y2.copy())
-        C_list_diff_date[1].append(C2.copy())
+        X_sub, Y_sub, C_sub = {}, {}, {}
         
-        X_list_diff_date[2].append(X3.copy())
-        Y_list_diff_date[2].append(Y3.copy())
-        C_list_diff_date[2].append(C3.copy())
-        
+        for i_diff, diff in enumerate(diff_type):
+            X_sub[diff], Y_sub[diff], C_sub[diff] = extract_data(data, events, i_file, str(diff))
+            
+            X_list_diff_date[i_diff].append(X_sub[diff].copy())
+            Y_list_diff_date[i_diff].append(Y_sub[diff].copy())
+            C_list_diff_date[i_diff].append(C_sub[diff].copy())
         
     # Concatenate over dates
     X_list_diff = []
@@ -207,25 +202,24 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         X_list_diff.append(X.copy())
         Y_list_diff.append(Y.copy())
         C_list_diff.append(C.copy())
-        
-    print('Event 1 X shape: ', X_list_diff[0].shape)
-    print('Event 2 X shape: ', X_list_diff[1].shape)
-    print('Event 3 X shape: ', X_list_diff[2].shape)
     
     # Concatenate over difficulties
-    for i in range(len(diff_type)):
-        index_list = diff_type[i]-1
-        if i == 0:
-            X = X_list_diff[index_list]
-            Y = Y_list_diff[index_list]
-            C = C_list_diff[index_list]
-        else:
-            X = np.concatenate((X, X_list_diff[index_list]), axis=0)
-            Y = np.concatenate((Y, Y_list_diff[index_list]))
-            C = np.concatenate((C, C_list_diff[index_list]))
+    for i, diff in enumerate(diff_type):
+        
+        #print('Event %s X shape: %s'%(str(diff), X_list_diff[i].shape))
             
-    print('Combined X shape: ', X.shape)
+        if i == 0:
+            X = X_list_diff[i]
+            Y = Y_list_diff[i]
+            C = C_list_diff[i]
+        else:
+            X = np.concatenate((X, X_list_diff[i]), axis=0)
+            Y = np.concatenate((Y, Y_list_diff[i]))
+            C = np.concatenate((C, C_list_diff[i]))
+            
+    #print('Combined X shape: ', X.shape)
     
+    '''
     # Remove trials with solution time more than 120 seconds
     chosen_trials = np.where(Y <= 120)[0]
     X = X[chosen_trials, :, :]
@@ -233,6 +227,7 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
     C = C[chosen_trials]
     
     print('After removing outliers, X shape: ', X.shape)
+    '''
     
     C = C.astype('int')
     

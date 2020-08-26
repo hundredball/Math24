@@ -22,10 +22,11 @@ import sampling
 
 parser = argparse.ArgumentParser(description='Signal to image')
 parser.add_argument('-m', '--mode', default='normal', help='Generating method')
-parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
+parser.add_argument('-d', '--data_cate', default=2, type=int, help='Category of data')
+parser.add_argument('-t', '--num_time', default=10, type=int, help='Number of frames for each example')
 
 
-def generate_topo(ERSP, freqs, num_time=1):
+def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
     '''
     Generate mixed topoplot
 
@@ -47,6 +48,10 @@ def generate_topo(ERSP, freqs, num_time=1):
     assert isinstance(freqs, np.ndarray) and freqs.ndim==1
     assert isinstance(num_time, int) and num_time >= 1
     assert (ERSP.ndim==3 and num_time==1) or (ERSP.ndim==4 and ERSP.shape[3]==num_time)
+    if train_indices is None:
+        train_indices = np.arange(ERSP.shape[0])
+    else:
+        assert isinstance(train_indices, np.ndarray) and train_indices.ndim==1
     
     if ERSP.ndim==3:
         ERSP_all = np.expand_dims(ERSP, axis=3)
@@ -145,11 +150,16 @@ def generate_topo(ERSP, freqs, num_time=1):
             figure_r = plt.imread('./images/%s.png'%(band_name[0]))
             figure_g = plt.imread('./images/%s.png'%(band_name[1]))
             figure_b = plt.imread('./images/%s.png'%(band_name[2]))
+            
+            if i_data in train_indices:
+                dirName = 'train'
+            else:
+                dirName = 'test'
 
             figure_mix = (figure_r+figure_g+figure_b)/3
             fileName = '%d_mix_%d'%(i_data, i_time)
-            # plt.imsave('./images/%s.png'%(fileName), figure_mix)
-            dict_img[fileName] = np.floor(figure_mix*255)
+            plt.imsave('./images/%s/%s.png'%(dirName, fileName), figure_mix)
+            # dict_img[fileName] = np.floor(figure_mix*255)
 
             # Only save fileNames for the first time step
             if i_time == 0:
@@ -211,7 +221,7 @@ def split(fileNames, SLs, test_size=0.1, random=True):
     
     print('Generate files for dataset referencing')
     
-def S2I_main(ERSP_all, tmp_all, freqs, indices, mode):
+def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
     '''
     Standardize data, then generate topo
 
@@ -238,11 +248,7 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode):
     assert isinstance(freqs, np.ndarray) and freqs.ndim == 1
     assert isinstance(indices, dict)
     assert isinstance(mode, str)
-    
-    if mode == 'multiframe':
-        num_time = 19
-    else:
-        num_time = 1
+    assert isinstance(num_time, int)
     
     # Standardize the data
     ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'])
@@ -262,7 +268,7 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode):
     start_time = time.time()
     print('[%.1f] Signal to image (%s)'%(time.time()-start_time, mode))
     
-    fileNames = generate_topo(ERSP_concat, freqs, num_time)
+    fileNames = generate_topo(ERSP_concat, freqs, num_time, np.arange(len(indices['train'])))
     split(fileNames, SLs_concat, len(SLs_dict['test']), random = False)
     
     print('[%.1f] Finish S2I'%(time.time()-start_time))
@@ -278,10 +284,9 @@ if __name__ == '__main__':
         ERSP_all, tmp_all, freqs = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq']
         print('Shape of ERSP_all: ', ERSP_all.shape)
     
-    
     # Split data
     indices = {}
     indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
     
-    S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode)
+    S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time)
     

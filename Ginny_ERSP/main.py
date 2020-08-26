@@ -42,6 +42,7 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('-n', '--file_name', default = '', help='filename after model_name')
 parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
+parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frame for each example')
 
 
 def main():
@@ -64,7 +65,7 @@ def main():
         
         # Set split indices
         indices = {}
-        indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
+        indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=15)
         
         # Standardize data
         ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices = indices['train'])
@@ -74,11 +75,13 @@ def main():
         train_data, test_data = tuple([ ERSP_all[indices[kind],:] for kind in ['train','test'] ])
         train_target, test_target = tuple([ SLs[indices[kind]].reshape((-1,1)) for kind in ['train','test'] ])
         
+        '''
         # PCA Transform
         pca = PCA(n_components=0.9)
         pca.fit(train_data)
         train_data = pca.transform(train_data)
         test_data = pca.transform(test_data)
+        '''
 
         '''
         # Undersampling
@@ -100,11 +103,7 @@ def main():
         
     elif args.input_type == 'image':
         
-        # Use multiframe input
-        if args.model_name in multiframe:
-            num_time = 20
-        else:
-            num_time = 1
+        assert (args.model_name in multiframe) == (args.num_time>1)
         
         # Let input size be 224x224 if the model is vgg16
         if args.model_name == 'vgg16':
@@ -115,17 +114,17 @@ def main():
         # Load Data
         data_transforms = {
                 'train': transforms.Compose([
-                        ndl.Rescale(input_size, num_time),
-                        ndl.ToTensor(num_time)]), 
+                        ndl.Rescale(input_size, args.num_time),
+                        ndl.ToTensor(args.num_time)]), 
                 'test': transforms.Compose([
-                        ndl.Rescale(input_size, num_time),
-                        ndl.ToTensor(num_time)])
+                        ndl.Rescale(input_size, args.num_time),
+                        ndl.ToTensor(args.num_time)])
                 }
 
         print("Initializing Datasets and Dataloaders...")
 
         # Create training and testing datasets
-        image_datasets = {x: ndl.TopoplotLoader('images', x, num_time, data_transforms[x]) for x in ['train', 'test']}
+        image_datasets = {x: ndl.TopoplotLoader('images', x, args.num_time, data_transforms[x]) for x in ['train', 'test']}
 
         # Create training and testing dataloaders
         batchSize = 32
@@ -149,9 +148,9 @@ def main():
     elif args.model_name == 'convnet':
         model = convnet(input_size)
     elif args.model_name == 'convlstm':
-        model = convlstm(input_size, 64, 32, num_time)
+        model = convlstm(input_size, 64, 32, args.num_time)
     elif args.model_name == 'convfc':
-        model = convfc(input_size, 32, num_time)
+        model = convfc(input_size, 32, args.num_time)
         
     print('Use model %s'%(args.model_name))
         
@@ -377,8 +376,8 @@ def plot_std(train, test, fileName=None):
     None.
 
     '''
-    assert hasattr(train, __iter__)
-    assert hasattr(test, __iter__)
+    assert hasattr(train, '__iter__')
+    assert hasattr(test, '__iter__')
     
     epoch = list(range(len(train)))
     plt.plot(epoch, train, 'r-', epoch, test, 'b--')

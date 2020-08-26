@@ -7,16 +7,29 @@ class MyNet(nn.Module):
 
     def __init__(self, in_features):
         super(MyNet, self).__init__()
-        self.fc1 = nn.Linear(in_features, 100)
-        self.fc2 = nn.Linear(100, 50)
-        self.fc3 = nn.Linear(50, 30)
-        self.fc4 = nn.Linear(30, 1)
+        
+        self.conv = nn.Conv1d(in_channels=in_features, out_channels=in_features, kernel_size=1, groups=in_features)
+        self.batchnorm = nn.BatchNorm1d(in_features)
+        self.sigmoid = nn.Sigmoid()
+        self.fc = nn.Sequential(
+            nn.Linear(in_features, 100),
+            nn.ReLU(),
+            nn.Linear(100, 50),
+            nn.ReLU(),
+            nn.Linear(50, 1)
+            )
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.fc2(x)
-        x = self.fc3(x)
-        x = self.fc4(x)
+        
+        # Depthwise separable convolution
+        x = x.reshape((x.shape[0], -1, 1))
+        x = self.conv(x)
+        x = self.batchnorm(x)
+        x = self.sigmoid(x)
+        
+        # Linear
+        x = x.reshape((x.shape[0],-1))
+        x = self.fc(x)
 
         return x
 

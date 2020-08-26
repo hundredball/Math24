@@ -7,6 +7,7 @@ Created on Sat Jul 11 10:28:06 2020
 """
 
 import numpy as np
+from sklearn.decomposition import PCA
 import dataloader
 
 def standardize(ERSP, tmp, num_time=1, train_indices=None):
@@ -36,10 +37,10 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
     assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 4
     assert isinstance(tmp, np.ndarray) and (tmp.ndim == 2 or tmp.ndim == 1)
     assert isinstance(num_time, int) and num_time >= 1
-    assert ERSP.shape[3]%num_time == 0
+    #assert ERSP.shape[3]%num_time == 0
     
     if train_indices is None:
-        train_indices = np.array([True]*ERSP.shape[0])
+        train_indices = np.arange(ERSP.shape[0])
     
     time_step = int(ERSP.shape[3]/num_time)
     # Average over time
@@ -47,13 +48,15 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
     for i_time in range(num_time):
         ERSP_avg[:,:,:,i_time] = np.mean(ERSP[:,:,:, i_time*time_step:(i_time+1)*time_step], axis=3)
 
-    # Subtract the base spectrum (trials <= 5s)
+    # Subtract the base spectrum (trials <= 80%)
     if tmp.ndim == 2:
         SLs = tmp[:, 2]
     else:
         SLs = tmp
-    train_ERSP_avg = ERSP_avg[train_indices,:,:,:]
-    base = np.mean(train_ERSP_avg[np.where(SLs[train_indices]<=5)[0], :, :, :], axis=0)
+    # base = np.mean(ERSP_avg[np.where(SLs[train_indices]<=5)[0], :, :, :], axis=0)
+    threshold = np.quantile(SLs,0.2)
+    print('Base threshold: %.4f'%(threshold))
+    base = np.mean(ERSP_avg[ train_indices[np.where(SLs[train_indices]<=threshold)[0]], :, :, : ], axis=0)
     ERSP_avg = ERSP_avg - base[np.newaxis, :, :, :]
         
     if num_time == 1:
@@ -89,7 +92,7 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
     assert isinstance(threshold_corr, float) and 0<=threshold_corr<=1
     
     if train_indices is None:
-        train_indices = np.array([True]*ERSP.shape[0])
+        train_indices = np.arange(ERSP.shape[0])
     
     train_ERSP = ERSP[train_indices,:]
     train_SLs = SLs[train_indices]
@@ -109,12 +112,12 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
     
     # Select interested ERSP
     abs_corr = abs(corr_ERSP_SLs)
-    select_indices = np.zeros(abs_corr.shape)
-    select_indices[abs_corr >= np.quantile(abs_corr, 0.75)] = 1
+    select_indices = np.zeros(ERSP_corr.shape[0])
+    select_indices[abs_corr >= np.quantile(abs_corr, threshold_corr)] = 1
     
     select_ERSP = ERSP.reshape((ERSP.shape[0],-1))[:, select_indices==1]
     #print(select_ERSP.shape)
-    print('Select %d features'%(np.sum(select_indices)))
+    #print('Select %d features'%(np.sum(select_indices)))
     
     return select_ERSP, select_indices
 
@@ -244,7 +247,7 @@ def make_target(SLs, threshold=None):
     
     return Y
 
-def PCA_corr(X_train, Y_train, X_test=None):
+def PCA_corr(X_train, Y_train, X_test=None, num_features=2):
     '''
     Find two PCs most correlated with SLs
 
@@ -269,46 +272,33 @@ def PCA_corr(X_train, Y_train, X_test=None):
     assert X_train.shape[0] == Y_train.shape[0]
     if X_test is not None:
         assert isinstance(X_test, np.ndarray) and X_test.ndim == 2
+    if num_features is not None:
+        assert isinstance(num_features, int) and num_features>0
     
     # PCA fit
-    num_train = X_train.shape[0]
-    mean_X = 1/num_train * np.dot(X_train.T, np.ones((num_train,1))).T
-    cen_X_train = X_train - mean_X
-    cov_X_train = 1/num_train * np.dot(cen_X_train.T, cen_X_train)
-    w, v = np.linalg.eig(cov_X_train)
+    pca = PCA(n_components=0.9)
+    pca.fit(X_train)
+    X_train_pca = pca.transform(X_train)
 
-    # Sort the eigenvalues and eigenvectors in decreasing order
-    sorted_indices = np.argsort(w)[::-1]
-    sorted_v = v[:, sorted_indices]
-    sorted_w = np.sort(w)[::-1]
+    # Find n PCs correlated most strongly with SLs
+    corr_coef = np.zeros(pca.n_components_)
+    for i in range(pca.n_components_):
+        corr_coef[i] = abs(np.corrcoef(X_train_pca[:,i], Y_train)[0,1])
 
-    # Retain PCs with 80% eigenvalues
-    ratios = np.add.accumulate(sorted_w.real)/np.sum(sorted_w.real)
-    num_PCs = np.sum(ratios<=0.8)
-    PCs = sorted_v[:, :num_PCs]
-
-    # PCA predict
-    X_train = np.dot(cen_X_train, PCs)
-
-    # Find two PCs correlated most strongly with SLs
-    corr_coef = np.zeros(num_PCs)
-    for i in range(num_PCs):
-        corr_coef[i] = abs(np.corrcoef(X_train[:,i], Y_train)[0,1])
-
-    max_1_index = np.argmax(corr_coef)
-    print('First: %d, %f'%(max_1_index, np.max(corr_coef)))
-
-    corr_coef[max_1_index] = 0
-    max_2_index = np.argmax(corr_coef)
-    print('Second: %d, %f'%(max_2_index, np.max(corr_coef)))
+    # Sort correlation coefficients in decreasing order
+    sorted_indices = np.argsort(corr_coef)[::-1]
+    feature_indices = [sorted_indices[i] for i in range(num_features)]
+    for i in range(num_features):
+        print('%d. %.3f'%(i+1, corr_coef[feature_indices[i]]))
     
-    PC_2 = sorted_v[:, [max_1_index, max_2_index]]
+    PC_n = pca.components_[feature_indices, :]
     
-
     # PCA predict
-    X_train = abs(np.dot(cen_X_train, PC_2))
+    X_train = X_train - pca.mean_
+    X_train = np.dot(X_train, PC_n.T)
     if X_test is not None:
-        X_test = abs(np.dot(X_test-mean_X, PC_2))
+        X_test = X_test - pca.mean_
+        X_test = np.dot(X_test, PC_n.T)
         return X_train, X_test
     
     return X_train
@@ -351,5 +341,6 @@ if __name__ == '__main__':
     ERSP_all, tmp_all, freqs = dataloader.load_data()
     ERSP_all, SLs = standardize(ERSP_all, tmp_all)
     
-    select_ERSP, select_indices = select_correlated_ERSP(ERSP_all, SLs)
+    #select_ERSP, select_indices = select_correlated_ERSP(ERSP_all, SLs)
     
+    #X_train = PCA_corr(select_ERSP, SLs, 5)

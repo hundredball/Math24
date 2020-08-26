@@ -111,6 +111,7 @@ def STFT(data, SLs, channels, low, high):
         # Read channel locations
         channel_info = pd.read_csv('./Channel_coordinate/%s_channels_class.csv'%(data_names[date]))
         channel_info = channel_info.to_numpy()
+
         
         # Change the order of data
         temp_X = np.array([data[i, np.where(channel_order[j]==channel_info[:,1])[0],:] for j in range(data.shape[1])])
@@ -127,6 +128,7 @@ def STFT(data, SLs, channels, low, high):
     new_f = np.linspace(0, f[-1], 2*(f.shape[0]+4))
     Zxx = interp(new_f)
     '''
+    
     new_f = f
     
     # Remove imaginary part
@@ -135,15 +137,6 @@ def STFT(data, SLs, channels, low, high):
     # Transform to dB power
     print('Transform to dB')
     Zxx = 10*np.log10(Zxx)
-    
-    '''
-    # Subtract the base spectrum (trials <= 5s)
-    base = np.mean(Zxx[np.where(SLs<=5)[0], :, :], axis=0)
-    Zxx = Zxx - base[np.newaxis, :, :]
-    
-    # Transform back 
-    # Zxx = 10 ** (Zxx/10)
-    '''
     
     # Find intersecting values in frequency vector
     idx = np.logical_and(new_f >= low, new_f <= high)

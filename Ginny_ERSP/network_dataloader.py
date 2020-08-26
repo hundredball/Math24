@@ -33,9 +33,10 @@ class TopoplotLoader(data.Dataset):
         self.num_time = num_time
         self.img_shape = np.zeros(3, dtype=int)
         self.transform = transform
-        
+        '''
         with open('./images/img.data', 'rb') as fp:
             self.dict_img = pickle.load(fp)
+        '''
         
         print("> Found %d images, %d examples" % (len(self.img_name)*self.num_time, len(self.img_name)))
 
@@ -66,13 +67,15 @@ class TopoplotLoader(data.Dataset):
         for i_time in range(self.num_time):
             
             fileName = self.img_name[index][:-1] + str(i_time)
-            '''
-            path = self.root + '/' + self.img_name[index] + '.png'
+            
+            path = '%s/%s/%s.png'%(self.root, self.mode, fileName)
             label = self.label[index]
             img = io.imread(path)
+            
             '''
             label = self.label[index]
             img = self.dict_img[fileName]
+            '''
 
             # set to pixel value to 0~1
             img = img/255
