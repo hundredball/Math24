@@ -1,5 +1,4 @@
 import argparse
-import os
 import shutil
 import time
 import matplotlib.pyplot as plt
@@ -17,15 +16,25 @@ import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data as Data
 import torchvision
-import torchvision.models as models
+import torchvision.models as tv_models
 import torchvision.transforms as transforms
 
 import dataloader
 import preprocessing
 import sampling
 import network_dataloader as ndl
+
+import os,sys,inspect
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir) 
+import raw_dataloader
+'''
 from mynet import mynet
 from RCNN import *
+from eegnet import 
+'''
+import models as models
 
 best_std = 100
 # select gpus
@@ -49,13 +58,31 @@ def main():
     global best_std, device, num_epoch, args
     
     args = parser.parse_args()
-    lr_step = [40, 70]
+    lr_step = [40, 70, 120]
     multiframe = ['convlstm', 'convfc']
     
     torch.cuda.empty_cache()
     
     # ------------- Wrap up dataloader -----------------
     if args.input_type == 'signal':
+        X, Y_class, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class')
+        
+        # (sample, channel, time) -> (sample, channel_NN, channel_EEG, time)
+        X = X.reshape((X.shape[0], 1, X.shape[1], X.shape[2]))
+        
+        # Split data
+        train_data, test_data, train_target, test_target = train_test_split(X, Y_reg, test_size=0.1, random_state=15)
+        
+        (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
+                torch.from_numpy, (train_data, train_target, test_data, test_target))
+        [train_dataset,test_dataset] = map(\
+                Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
+
+        batchSize = 64
+        train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
+        test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
+        
+    elif args.input_type == 'power':
         if args.data_cate == 1:
             ERSP_all, tmp_all, freqs = dataloader.load_data()
         elif args.data_cate == 2:
@@ -75,23 +102,6 @@ def main():
         train_data, test_data = tuple([ ERSP_all[indices[kind],:] for kind in ['train','test'] ])
         train_target, test_target = tuple([ SLs[indices[kind]].reshape((-1,1)) for kind in ['train','test'] ])
         
-        '''
-        # PCA Transform
-        pca = PCA(n_components=0.9)
-        pca.fit(train_data)
-        train_data = pca.transform(train_data)
-        test_data = pca.transform(test_data)
-        '''
-
-        '''
-        # Undersampling
-        train_data, train_target = sampling.undersampling(train_data, train_target)
-        
-
-        # SMOTER
-        train_data, train_target = sampling.SMOTER(train_data, train_target)
-        '''
-
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
         [train_dataset,test_dataset] = map(\
@@ -133,10 +143,11 @@ def main():
         
         
     # ------------ Create model ---------------
+    
     if args.model_name == 'mynet':
-        model = mynet(train_data.shape[1])
+        model = models.__dict__[args.model_name](train_data.shape[1])
     elif args.model_name == 'vgg16':
-        model = models.vgg16(pretrained=True)
+        model = tv_models.vgg16(pretrained=True)
         set_parameter_requires_grad(model, True)
         
         model.classifier[0] = nn.Linear(model.classifier[0].in_features, model.classifier[0].out_features)
@@ -146,11 +157,13 @@ def main():
         
         model.classifier[6] = nn.Linear(model.classifier[6].in_features,1)
     elif args.model_name == 'convnet':
-        model = convnet(input_size)
+        model = models.__dict__[args.model_name](input_size)
     elif args.model_name == 'convlstm':
-        model = convlstm(input_size, 64, 32, args.num_time)
+        model = models.__dict__[args.model_name](input_size, 64, 32, args.num_time)
     elif args.model_name == 'convfc':
-        model = convfc(input_size, 32, args.num_time)
+        model = models.__dict__[args.model_name](input_size, 32, args.num_time)
+    elif args.model_name == 'eegnet':
+        model = models.__dict__[args.model_name](nn.ReLU(), (train_data.shape[2], train_data.shape[3]))
         
     print('Use model %s'%(args.model_name))
         

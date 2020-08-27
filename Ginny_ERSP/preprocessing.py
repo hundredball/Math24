@@ -311,8 +311,9 @@ def remove_trials(ERSP_all, tmp_all, threshold):
     ----------
     ERSP_all : nd numpy array (epoch, ...)
         All data
-    tmp_all : 2d numpy array (epoch, time_periods)
+    tmp_all : nd numpy array (epoch, time_periods)
         time_periods include time points of fixation, cue, end
+        or solution latency
     threshold : float or int
         Threshold of removing trials
     Returns
@@ -324,12 +325,15 @@ def remove_trials(ERSP_all, tmp_all, threshold):
     
     '''
     assert isinstance(ERSP_all, np.ndarray)
-    assert isinstance(tmp_all, np.ndarray) and tmp_all.ndim == 2
+    assert isinstance(tmp_all, np.ndarray)
     assert isinstance(threshold, int) or isinstance(threshold, float)
     assert threshold > 0
     
-    # Remove trials with SLs >= 40
-    remove_indices = np.where(tmp_all[:,2]>=threshold)[0]
+    # Remove trials with SLs >= threshold
+    if tmp_all.ndim == 2:
+        remove_indices = np.where(tmp_all[:,2]>=threshold)[0]
+    elif tmp_all.ndim == 1:
+        remove_indices = np.where(tmp_all>=threshold)[0]
     ERSP_rem = np.delete(ERSP_all, remove_indices, axis=0)
     tmp_rem = np.delete(tmp_all, remove_indices, axis=0)
     print('> Remove %d trials'%(tmp_all.shape[0]-tmp_rem.shape[0]))

@@ -13,7 +13,7 @@ from scipy import signal
 from scipy import interpolate
 from scipy.integrate import simps
 
-import dataloader as dl
+import raw_dataloader as dl
 
 fs = 256
 
@@ -62,7 +62,7 @@ def get_bandpower(data, low = [4,7,13], high=[7,13,30]):
 
 def STFT(data, SLs, channels, low, high):
     '''
-    Order the channels, then adopt STFT to data to get ERSP, and finally save it
+    Adopt STFT to data to get ERSP, and finally save it
 
     Parameters
     ----------
@@ -95,28 +95,6 @@ def STFT(data, SLs, channels, low, high):
     assert isinstance(channels, np.ndarray) and channels.ndim == 1
     assert isinstance(low, int) and isinstance(high, int)
     assert (high >= low >= 0)
-    
-    print('--- Arrange all the channels as the same order ---\n')
-    # Get list of data names
-    df_names = pd.read_csv('./Data_Matlab/data_list.csv')
-    data_names = [x[0:6] for x in df_names.values.flatten()]
-    
-    # Order of channels
-    channel_order = pd.read_csv('./Channel_coordinate/Channel_location_angle.csv')['Channel'].values
-    
-    # Arrange all the channels in the same order
-    for i in range(data.shape[0]):
-        date = channels[i]
-    
-        # Read channel locations
-        channel_info = pd.read_csv('./Channel_coordinate/%s_channels_class.csv'%(data_names[date]))
-        channel_info = channel_info.to_numpy()
-
-        
-        # Change the order of data
-        temp_X = np.array([data[i, np.where(channel_order[j]==channel_info[:,1])[0],:] for j in range(data.shape[1])])
-        temp_X = temp_X.reshape((data.shape[1], -1))
-        data[i,:] = temp_X
     
     print('--- STFT ---\n')
     f, t, Zxx = signal.stft(data, fs, nperseg = 512, noverlap = 512-3, axis=2)

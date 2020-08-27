@@ -54,6 +54,6 @@ for i_data = 1:size(data_list, 1)
     data = EEG.data;
     event = {EEG.event.latency;EEG.event.type}';
     chanlocs = EEG.chanlocs;
-    save(['./Data_Python/' fileName(1:6) '.mat'], 'data', 'event', 'chanlocs');
+    %save(['./Data_Python/' fileName(1:6) '.mat'], 'data', 'event', 'chanlocs');
     fprintf([int2str(i_data) '. Save ' fileName(1:6) '.mat\n'])
 end

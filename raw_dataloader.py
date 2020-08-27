@@ -218,8 +218,8 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
             C = np.concatenate((C, C_list_diff[i]))
             
     #print('Combined X shape: ', X.shape)
+    C = C.astype('int')
     
-    '''
     # Remove trials with solution time more than 120 seconds
     chosen_trials = np.where(Y <= 120)[0]
     X = X[chosen_trials, :, :]
@@ -227,9 +227,24 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
     C = C[chosen_trials]
     
     print('After removing outliers, X shape: ', X.shape)
-    '''
     
-    C = C.astype('int')
+    print('Arrange all the channels as the same order\n')
+    
+    # Order of channels
+    channel_order = pd.read_csv('%s/Channel_coordinate/Channel_location_angle.csv'%(root_path))['Channel'].values
+    
+    # Arrange all the channels in the same order
+    for i in range(X.shape[0]):
+        date = C[i]
+    
+        # Read channel locations
+        channel_info = pd.read_csv('%s/Channel_coordinate/%s_channels_class.csv'%(root_path,data_names[date]))
+        channel_info = channel_info.to_numpy()
+        
+        # Change the order of data
+        temp_X = np.array([X[i, np.where(channel_order[j]==channel_info[:,1])[0],:] for j in range(X.shape[1])])
+        temp_X = temp_X.reshape((X.shape[1], -1))
+        X[i,:] = temp_X
     
     # Return data, channel and Y_class, Y_reg depending on mode
     if pred_type == 'class':
