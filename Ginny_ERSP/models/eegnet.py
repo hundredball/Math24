@@ -13,13 +13,16 @@ import numpy as np
 __all__ = ['eegnet']
 
 class EEGNet(torch.nn.Module):
-    def __init__(self, activation, size_2d, F1=16, D=2, F2=32, KS1=64, KS2=16):
+    def __init__(self, activation, size_2d, fs=256, F1=16, D=2, F2=32, KS1=64, KS2=16):
         super(EEGNet, self).__init__()
+        KS1 = fs//2
+        KS2 = fs//4
+        
         self.firstconv = torch.nn.Sequential(
             torch.nn.Conv2d(1, F1, kernel_size=(1,KS1), stride=(1,1), padding=(0,KS1//2), bias=False),
             torch.nn.BatchNorm2d(F1))
         self.depthwiseConv = torch.nn.Sequential(
-            torch.nn.Conv2d(F1,D*F1, kernel_size=(2,1), stride=(1,1), groups=F1, bias=False),
+            torch.nn.Conv2d(F1,D*F1, kernel_size=(D,1), stride=(1,1), groups=F1, bias=False),
             torch.nn.BatchNorm2d(D*F1),
             activation,
             torch.nn.AvgPool2d(kernel_size=(1,4), stride=(1,4)),
@@ -34,7 +37,7 @@ class EEGNet(torch.nn.Module):
             activation,
             torch.nn.AvgPool2d(kernel_size=(1,8), stride=(1,8)),
             torch.nn.Dropout(p=0.5))
-        self.classify = torch.nn.Linear(in_features=(size_2d[0]-1)*(size_2d[1]//4//8)*F2,out_features=1)
+        self.classify = torch.nn.Linear(in_features=(size_2d[0]-(D-1))*(size_2d[1]//4//8)*F2,out_features=1)
         
 #        self.classify = torch.nn.Linear(in_features=224,out_features=3)
             
@@ -44,7 +47,7 @@ class EEGNet(torch.nn.Module):
         x = self.separableConv(x)
         
         # flatten the data
-        x = torch.reshape(x, (x.size()[0], np.prod( x.size()[1:]) ))
+        x = x.reshape((x.shape[0], -1))
         x = self.classify(x)
         
         # flatten the output
@@ -52,6 +55,6 @@ class EEGNet(torch.nn.Module):
         
         return x
     
-def eegnet(activation, size_2d):
-    model = EEGNet(activation, size_2d)
+def eegnet(activation, size_2d, fs=256, F1=16, D=2, F2=32, KS1=64, KS2=16):
+    model = EEGNet(activation, size_2d, fs, F1, D, F2, KS1, KS2)
     return model

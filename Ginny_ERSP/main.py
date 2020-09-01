@@ -1,6 +1,8 @@
 import argparse
 import shutil
 import time
+import faulthandler
+import signal
 import matplotlib.pyplot as plt
 import numpy as np
 import pickle
@@ -21,7 +23,7 @@ import torchvision.transforms as transforms
 
 import dataloader
 import preprocessing
-import sampling
+import data_augmentation
 import network_dataloader as ndl
 
 import os,sys,inspect
@@ -52,10 +54,13 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
 parser.add_argument('-n', '--file_name', default = '', help='filename after model_name')
 parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
 parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frame for each example')
+parser.add_argument('-a', '--augmentation', default=None, type=str, help='Way of data augmentation')
 
 
 def main():
     global best_std, device, num_epoch, args
+    
+    faulthandler.enable()
     
     args = parser.parse_args()
     lr_step = [40, 70, 120]
@@ -67,18 +72,37 @@ def main():
     if args.input_type == 'signal':
         X, Y_class, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class')
         
-        # (sample, channel, time) -> (sample, channel_NN, channel_EEG, time)
-        X = X.reshape((X.shape[0], 1, X.shape[1], X.shape[2]))
-        
         # Split data
-        train_data, test_data, train_target, test_target = train_test_split(X, Y_reg, test_size=0.1, random_state=15)
+        train_data, test_data, train_target, test_target = train_test_split(X, Y_reg, test_size=0.1, random_state=23)
+        # Random state 15: training error becomes lower, testing error becomes higher
+        
+        # Data augmentation
+        if args.augmentation == 'overlapping':
+            train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation,
+                                                             (256, 64, 128))
+            test_data, test_target = data_augmentation.aug(test_data, test_target, args.augmentation,
+                                                             (256, 64, 128))
+        elif args.augmentation == 'add_noise':
+            train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation,
+                                                             (30, 1))
+        elif args.augmentation == 'add_noise_minority':
+            train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation,
+                                                             (30, 1))
+        elif args.augmentation == 'SMOTER':
+            train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation)
+            
+        if args.model_name == 'eegnet':
+            len_time = train_data.shape[2]
+            # (sample, channel, time) -> (sample, channel_NN, channel_EEG, time)
+            [train_data, test_data] = [X.reshape((X.shape[0], 1, X.shape[1], X.shape[2])) \
+                                       for X in [train_data, test_data]]
         
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
         [train_dataset,test_dataset] = map(\
                 Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
 
-        batchSize = 64
+        batchSize = 128
         train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
         test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
         
@@ -163,14 +187,16 @@ def main():
     elif args.model_name == 'convfc':
         model = models.__dict__[args.model_name](input_size, 32, args.num_time)
     elif args.model_name == 'eegnet':
-        model = models.__dict__[args.model_name](nn.ReLU(), (train_data.shape[2], train_data.shape[3]))
+        model = models.__dict__[args.model_name](nn.ReLU(), (train_data.shape[2], train_data.shape[3]), len_time, D=3)
         
     print('Use model %s'%(args.model_name))
         
     # Run on GPU
     model = model.to(device=device)
+    '''
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
+    '''
 
     # define loss function (criterion) and optimizer
     criterion = nn.MSELoss().to(device=device)
@@ -208,7 +234,7 @@ def main():
         dict_std['train'][epoch] = train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
-        std = validate(test_loader, model, criterion)
+        std, _, _ = validate(test_loader, model, criterion)
         dict_std['test'][epoch] = std
 
         # remember best standard error and save checkpoint
@@ -230,8 +256,14 @@ def main():
     with open('./results/%s_%s.data'%(args.model_name, args.file_name), 'wb') as fp:
         pickle.dump(dict_std, fp)
         
+    fileName = '%s_%s'%(args.model_name, args.file_name)
     # Plot error curve
-    plot_std(dict_std['train'], dict_std['test'], '%s_%s'%(args.model_name, args.file_name))
+    plot_std(dict_std['train'], dict_std['test'], fileName)
+    
+    # Plot scatter plots
+    _, target, pred = validate(test_loader, model, criterion)
+    plot_scatter(target, pred, fileName)
+    
 
 def train(train_loader, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
@@ -281,10 +313,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
                    epoch, args.num_epoch, i, len(train_loader), curr_lr,
                    batch_time=batch_time, data_time=data_time, loss=losses))
+            
+        del input
+        del target
+        torch.cuda.empty_cache()
     
-    del input
-    del target
-    torch.cuda.empty_cache()
 
     return (losses.avg)**0.5
 
@@ -294,7 +327,7 @@ def validate(val_loader, model, criterion):
 
     # switch to evaluate mode
     model.eval()
-
+    
     end = time.time()
     for i, sample in enumerate(val_loader):
         
@@ -326,12 +359,22 @@ def validate(val_loader, model, criterion):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
                    i, len(val_loader), batch_time=batch_time, loss=losses))
-    
-    del input
-    del target
+            
+        # Record target and prediction
+        target = target.flatten()
+        output = output.flatten()
+        if i == 0:
+            true = target.cpu().numpy()
+            pred = output.cpu().numpy()
+        else:
+            true = np.concatenate((true, target.cpu().numpy()))
+            pred = np.concatenate((pred, output.cpu().numpy()))
+            
+        del input
+        del target
     torch.cuda.empty_cache()
 
-    return (losses.avg)**0.5
+    return (losses.avg)**0.5, true, pred
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -371,7 +414,7 @@ def set_parameter_requires_grad(model, feature_extracting):
         for param in model.parameters():
             param.requires_grad = False
 
-def plot_std(train, test, fileName=None):
+def plot_std(train, test, fileName):
     '''
     Plot the standard error curve of training and testing data
 
@@ -399,7 +442,47 @@ def plot_std(train, test, fileName=None):
     plt.title('%s : (%.3f,%.3f)'%(fileName, min(train), min(test)))
     plt.legend(('Train', 'Test'))
     
-    plt.savefig('./results/%s.png'%(fileName))
+    plt.savefig('./results/%s_error.png'%(fileName))
+    
+def plot_scatter(true, pred, fileName):
+    '''
+    Plot the scatter plots of true target and prediction
+
+    Parameters
+    ----------
+    true : iterator
+        Target
+    pred : iterator
+        Prediction
+    fileName : str
+        File name
+
+    Returns
+    -------
+    None.
+
+    '''
+    assert hasattr(true, '__iter__')
+    assert hasattr(pred, '__iter__')
+    assert isinstance(fileName, str)
+    
+    sort_indices = np.argsort(true)
+    fig, axs = plt.subplots(1,2, figsize=(8,4))
+    axs[0].plot(range(len(true)), true[sort_indices], 'r.', range(len(true)), pred[sort_indices], 'b.')
+    axs[0].set_xlabel('Record number')
+    axs[0].set_ylabel('Solution latency')
+    axs[0].legend(('True', 'Pred'))
+    
+    max_value = np.max(np.hstack((true, pred)))
+    axs[1].scatter(true, pred, marker='.')
+    axs[1].set_xlabel('True')
+    axs[1].set_ylabel('Pred')
+    axs[1].set_xlim([0, max_value])
+    axs[1].set_ylim([0, max_value])
+    
+    plt.suptitle(fileName)
+    
+    plt.savefig('./results/%s_scatter.png'%(fileName))
 
 if __name__ == '__main__':
     main()

@@ -10,7 +10,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 import dataloader
 
-def standardize(ERSP, tmp, num_time=1, train_indices=None):
+def standardize(ERSP, tmp, num_time=1, train_indices=None, threshold=5.0):
     '''
     Average over time and subtract the base spectrum
 
@@ -25,6 +25,9 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
         Number of time steps after standardizing. The default is 1.
     train_indices : 1d numpy array
         Indices of training data. The default is None.
+    threshold : float
+        If 0<threshold<=1, threshold is the quantile ratio
+        If threshold > 1, threshold is the solution latency
         
     Returns
     -------
@@ -37,6 +40,7 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
     assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 4
     assert isinstance(tmp, np.ndarray) and (tmp.ndim == 2 or tmp.ndim == 1)
     assert isinstance(num_time, int) and num_time >= 1
+    assert isinstance(threshold, float) and threshold >= 0
     #assert ERSP.shape[3]%num_time == 0
     
     if train_indices is None:
@@ -53,10 +57,13 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None):
         SLs = tmp[:, 2]
     else:
         SLs = tmp
-    # base = np.mean(ERSP_avg[np.where(SLs[train_indices]<=5)[0], :, :, :], axis=0)
-    threshold = np.quantile(SLs,0.2)
-    print('Base threshold: %.4f'%(threshold))
-    base = np.mean(ERSP_avg[ train_indices[np.where(SLs[train_indices]<=threshold)[0]], :, :, : ], axis=0)
+    if 0 < threshold <= 1:
+        threshold = np.quantile(SLs,threshold)
+    print('Base threshold: %f'%(threshold))
+    if threshold == 0:
+        base = np.zeros(ERSP_avg.shape[1:])
+    else:
+        base = np.mean(ERSP_avg[ train_indices[np.where(SLs[train_indices]<=threshold)[0]], :, :, : ], axis=0)
     ERSP_avg = ERSP_avg - base[np.newaxis, :, :, :]
         
     if num_time == 1:
