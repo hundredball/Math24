@@ -8,6 +8,7 @@ Created on Sat Jul 11 10:28:06 2020
 
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn import preprocessing as skpp
 import dataloader
 
 def standardize(ERSP, tmp, num_time=1, train_indices=None, threshold=5.0):
@@ -70,6 +71,36 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None, threshold=5.0):
         ERSP_avg = np.squeeze(ERSP_avg, axis=3)
         
     return ERSP_avg, SLs
+
+def scale(train, test):
+    '''
+    Standardize training and testing data
+
+    Parameters
+    ----------
+    train : numpy 2d array (epoch, features)
+        Training data
+    test : numpy 2d array (epoch, features)
+        Testing data
+
+    Returns
+    -------
+    train : numpy 2d array (epoch, features)
+        Training data after standardizing
+    test : numpy 2d array (epoch, features)
+        Testing data after standardizing
+
+    '''
+    assert isinstance(train, np.ndarray) and train.ndim==2
+    assert isinstance(test, np.ndarray) and test.ndim==2
+    
+    scaler = skpp.StandardScaler().fit(train)
+    
+    test = scaler.transform(test)
+    train = scaler.transform(train)
+    
+    return train, test
+    
 
 def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None):
     '''

@@ -18,12 +18,12 @@ import pickle
 
 import dataloader
 import preprocessing
-import sampling
+import data_augmentation
 
 parser = argparse.ArgumentParser(description='Signal to image')
-parser.add_argument('-m', '--mode', default='normal', help='Generating method')
-parser.add_argument('-d', '--data_cate', default=2, type=int, help='Category of data')
-parser.add_argument('-t', '--num_time', default=10, type=int, help='Number of frames for each example')
+parser.add_argument('-m', '--mode', default='normal', type=str, help='Generating method')
+parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
+parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frames for each example')
 
 
 def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
@@ -255,11 +255,12 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
     ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
     SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}
     
-    if mode == 'SMOTE':
-        num_train = ERSP_dict['train'].shape[0]
-        ERSP_dict['train'] = ERSP_dict['train'].reshape((num_train, -1))
-        ERSP_dict['train'], SLs_dict['train'] = sampling.SMOTER(ERSP_dict['train'], SLs_dict['train'])
-        ERSP_dict['train'] = ERSP_dict['train'].reshape((num_train, 12, -1))
+    # Data augmentation
+    if mode == 'SMOTER':
+        ERSP_dict['train'], SLs_dict['train'] = data_augmentation.aug(ERSP_dict['train'], SLs_dict['train'], 'SMOTER')
+    elif mode == 'add_noise':
+        ERSP_dict['train'], SLs_dict['train'] = data_augmentation.aug(ERSP_dict['train'], SLs_dict['train'], 
+                                                                      'add_noise', (10,1))
     
     # Concatenate training and testing data
     ERSP_concat = np.concatenate((ERSP_dict['train'], ERSP_dict['test']), axis=0)
@@ -268,7 +269,7 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
     start_time = time.time()
     print('[%.1f] Signal to image (%s)'%(time.time()-start_time, mode))
     
-    fileNames = generate_topo(ERSP_concat, freqs, num_time, np.arange(len(indices['train'])))
+    fileNames = generate_topo(ERSP_concat, freqs, num_time, np.arange(ERSP_dict['train'].shape[0]))
     split(fileNames, SLs_concat, len(SLs_dict['test']), random = False)
     
     print('[%.1f] Finish S2I'%(time.time()-start_time))

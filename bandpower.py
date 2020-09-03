@@ -60,7 +60,7 @@ def get_bandpower(data, low = [4,7,13], high=[7,13,30]):
 
     return powers
 
-def STFT(data, SLs, channels, low, high):
+def STFT(data, SLs, channels, low, high, savePath=None):
     '''
     Adopt STFT to data to get ERSP, and finally save it
 
@@ -125,17 +125,20 @@ def STFT(data, SLs, channels, low, high):
     Zxx = Zxx[:,:,idx]
     
     # Save to pickle file
-    dict_ERSP = {'freq':new_f, 't':t, 'ERSP':Zxx, 'SLs':SLs}
-    with open('./ERSP_from_raw.data', 'wb') as fp:
-        pickle.dump(dict_ERSP, fp)
+    if savePath is not None:
+        dict_ERSP = {'freq':new_f, 't':t, 'ERSP':Zxx, 'SLs':SLs}
+        with open(savePath, 'wb') as fp:
+            pickle.dump(dict_ERSP, fp)
     
     return new_f, t, Zxx
 
 if __name__ == '__main__':
     
-    X, Y_class, Y_reg, channels = dl.read_data([1,2,3], list(range(11)), 'class')
+    # Save data for each subject
+    for i_sub in range(11):
+        X, Y_class, Y_reg, channels = dl.read_data([1,2,3], [i_sub], 'class')
     
-    # Adopt STFT and save file
-    freq, t, Zxx  = STFT(X, Y_reg, channels, 2, 30)
+        # Adopt STFT and save file
+        freq, t, Zxx  = STFT(X, Y_reg, channels, 2, 30, savePath='./Ginny_ERSP/raw_data/ERSP_from_raw_%s.data'%(str(i_sub)))
     
     

@@ -53,7 +53,7 @@ def undersampling(data, target):
     
     return new_data, new_target
 
-def SMOTER(data, target):
+def SMOTER(data, target, threshold=None):
     '''
     SMOTE for regression
 
@@ -85,7 +85,11 @@ def SMOTER(data, target):
         target = target.flatten()
     
     # Calculate the histogram of the data
-    hist, bin_edges = np.histogram(target, bins=10)
+    if threshold is not None:
+        assert 0<=threshold<=np.max(target)
+        hist, bin_edges = np.histogram(target, bins=[0, threshold, np.max(target)])
+    else:
+        hist, bin_edges = np.histogram(target, bins=10)
     max_index = np.argmax(hist)
     major_indices = np.where(np.logical_and(target >= bin_edges[max_index], target <= bin_edges[max_index+1]))[0]
     num_major = len(major_indices)
@@ -112,10 +116,12 @@ def SMOTER(data, target):
         new_target = np.zeros(num_new*num_minor)
         
         # Generate synthetic samples
-        if num_minor <= 6:
+        if num_minor < 2:
             data_aug = np.concatenate((data_aug, minor_data), axis=0)
             target_aug = np.concatenate((target_aug, minor_target))
             continue
+        elif 2 <= num_minor <= 6:
+            num_neigh = num_minor
         else:
             num_neigh = 6
         neigh = NearestNeighbors(n_neighbors=num_neigh, radius=0.4)
@@ -291,7 +297,7 @@ def aug(data, target, method, params=None):
     if method == 'undersampling':
         data, target = undersampling(data, target)
     elif method == 'SMOTER':
-        data, target = SMOTER(data, target)
+        data, target = SMOTER(data, target, params)
     elif method == 'overlapping':
         data, target = overlapping(data, target, params)
     elif method == 'add_noise':

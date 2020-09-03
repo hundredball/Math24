@@ -55,6 +55,8 @@ parser.add_argument('-n', '--file_name', default = '', help='filename after mode
 parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
 parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frame for each example')
 parser.add_argument('-a', '--augmentation', default=None, type=str, help='Way of data augmentation')
+parser.add_argument('-s', '--scale_flag', default=False, type=bool, help='Standardize data before feeding into the net')
+parser.add_argument('-b', '--batch_size', default=64, type=int, help='Batch size')
 
 
 def main():
@@ -102,9 +104,8 @@ def main():
         [train_dataset,test_dataset] = map(\
                 Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
 
-        batchSize = 128
-        train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
-        test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
+        train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
+        test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
         
     elif args.input_type == 'power':
         if args.data_cate == 1:
@@ -116,7 +117,7 @@ def main():
         
         # Set split indices
         indices = {}
-        indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=15)
+        indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=40)
         
         # Standardize data
         ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices = indices['train'])
@@ -126,14 +127,17 @@ def main():
         train_data, test_data = tuple([ ERSP_all[indices[kind],:] for kind in ['train','test'] ])
         train_target, test_target = tuple([ SLs[indices[kind]].reshape((-1,1)) for kind in ['train','test'] ])
         
+        # Scale data
+        if args.scale_flag:
+            train_data, test_data = preprocessing.scale(train_data, test_data)
+        
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
         [train_dataset,test_dataset] = map(\
                 Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
 
-        batchSize = 32
-        train_loader = Data.DataLoader(train_dataset, batch_size=batchSize)
-        test_loader = Data.DataLoader(test_dataset, batch_size=batchSize)
+        train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
+        test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
         
     elif args.input_type == 'image':
         
@@ -161,9 +165,8 @@ def main():
         image_datasets = {x: ndl.TopoplotLoader('images', x, args.num_time, data_transforms[x]) for x in ['train', 'test']}
 
         # Create training and testing dataloaders
-        batchSize = 32
-        train_loader = Data.DataLoader(image_datasets['train'], batch_size=batchSize, shuffle=True, num_workers=4)
-        test_loader = Data.DataLoader(image_datasets['test'], batch_size=batchSize, shuffle=False, num_workers=4)
+        train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, num_workers=4)
+        test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.batch_size, shuffle=False, num_workers=4)
         
         
     # ------------ Create model ---------------
@@ -276,7 +279,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
     for i, sample in enumerate(train_loader):
         
-        if args.input_type == 'signal':
+        if args.input_type in ['signal','power']:
             input, target = sample[0], sample[1]
         elif args.input_type == 'image':
             input, target = sample['image'], sample['label']
@@ -331,7 +334,7 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, sample in enumerate(val_loader):
         
-        if args.input_type == 'signal':
+        if args.input_type in ['signal','power']:
             input, target = sample[0], sample[1]
         elif args.input_type == 'image':
             input, target = sample['image'], sample['label']
@@ -475,6 +478,7 @@ def plot_scatter(true, pred, fileName):
     
     max_value = np.max(np.hstack((true, pred)))
     axs[1].scatter(true, pred, marker='.')
+    axs[1].plot(range(int(max_value)), range(int(max_value)), 'r')
     axs[1].set_xlabel('True')
     axs[1].set_ylabel('Pred')
     axs[1].set_xlim([0, max_value])
