@@ -38,7 +38,7 @@ from eegnet import
 '''
 import models as models
 
-best_std = 100
+best_error = 100
 # select gpus
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
@@ -52,15 +52,17 @@ parser.add_argument('--resume', default='', type=str, metavar='PATH',
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('-n', '--file_name', default = '', help='filename after model_name')
-parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
+parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data (for power)')
 parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frame for each example')
 parser.add_argument('-a', '--augmentation', default=None, type=str, help='Way of data augmentation')
-parser.add_argument('-s', '--scale_flag', default=False, type=bool, help='Standardize data before feeding into the net')
+parser.add_argument('-c', '--center_flag', default=False, type=bool, help='Center data before feeding into the net')
 parser.add_argument('-b', '--batch_size', default=64, type=int, help='Batch size')
+parser.add_argument('-l', '--loss_type', default='L2', type=str, help='Loss type')
+parser.add_argument('-f', '--image_folder', default='images', type=str, help='Image folder (for image)')
 
 
 def main():
-    global best_std, device, num_epoch, args
+    global best_error, device, num_epoch, args
     
     faulthandler.enable()
     
@@ -72,7 +74,7 @@ def main():
     
     # ------------- Wrap up dataloader -----------------
     if args.input_type == 'signal':
-        X, Y_class, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class')
+        X, Y_class, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline=True)
         
         # Split data
         train_data, test_data, train_target, test_target = train_test_split(X, Y_reg, test_size=0.1, random_state=23)
@@ -98,6 +100,8 @@ def main():
             # (sample, channel, time) -> (sample, channel_NN, channel_EEG, time)
             [train_data, test_data] = [X.reshape((X.shape[0], 1, X.shape[1], X.shape[2])) \
                                        for X in [train_data, test_data]]
+        if args.center_flag:
+            train_data, test_data = preprocessing.center(train_data, test_data)
         
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
@@ -111,7 +115,7 @@ def main():
         if args.data_cate == 1:
             ERSP_all, tmp_all, freqs = dataloader.load_data()
         elif args.data_cate == 2:
-            with open('./ERSP_from_raw.data', 'rb') as fp:
+            with open('./ERSP_from_raw_rb.data', 'rb') as fp:
                 dict_ERSP = pickle.load(fp)
             ERSP_all, tmp_all = dict_ERSP['ERSP'], dict_ERSP['SLs']
         
@@ -127,9 +131,13 @@ def main():
         train_data, test_data = tuple([ ERSP_all[indices[kind],:] for kind in ['train','test'] ])
         train_target, test_target = tuple([ SLs[indices[kind]].reshape((-1,1)) for kind in ['train','test'] ])
         
-        # Scale data
-        if args.scale_flag:
-            train_data, test_data = preprocessing.scale(train_data, test_data)
+        # Data augmentation
+        if args.augmentation == 'SMOTER':
+            train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation)
+        
+        # center data
+        if args.center_flag:
+            train_data, test_data = preprocessing.center(train_data, test_data)
         
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
@@ -162,7 +170,7 @@ def main():
         print("Initializing Datasets and Dataloaders...")
 
         # Create training and testing datasets
-        image_datasets = {x: ndl.TopoplotLoader('images', x, args.num_time, data_transforms[x]) for x in ['train', 'test']}
+        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x]) for x in ['train', 'test']}
 
         # Create training and testing dataloaders
         train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -196,18 +204,27 @@ def main():
         
     # Run on GPU
     model = model.to(device=device)
-    '''
+    
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    '''
+    
 
     # define loss function (criterion) and optimizer
-    criterion = nn.MSELoss().to(device=device)
+    if args.loss_type == 'L2':
+        criterion = nn.MSELoss().to(device=device)
+    elif args.loss_type == 'L1':
+        criterion = nn.L1Loss().to(device=device)
+    elif args.loss_type == 'L4':
+        criterion = L4Loss
+    elif args.loss_type == 'MyLoss':
+        criterion = MyLoss
+    print('Use %s loss'%(args.loss_type))
+    
     #optimizer = torch.optim.SGD(model.parameters(), 0.001,momentum=0.9)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     
     # Record loss and accuracy of each epoch
-    dict_std = {'train': list(range(args.num_epoch)), 'test': list(range(args.num_epoch))}
+    dict_error = {'train': list(range(args.num_epoch)), 'test': list(range(args.num_epoch))}
     
     # optionally resume from a checkpoint
     if args.resume:
@@ -215,10 +232,10 @@ def main():
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
             args.start_epoch = checkpoint['epoch']
-            best_std = checkpoint['best_std']
+            best_error = checkpoint['best_error']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            dict_std = checkpoint['dict_std']
+            dict_error = checkpoint['dict_error']
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
         else:
@@ -234,21 +251,21 @@ def main():
                 param_group['lr'] *= 0.1
         
         # train for one epoch
-        dict_std['train'][epoch] = train(train_loader, model, criterion, optimizer, epoch)
+        _, dict_error['train'][epoch] = train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
-        std, _, _ = validate(test_loader, model, criterion)
-        dict_std['test'][epoch] = std
+        _, _, _, error = validate(test_loader, model, criterion)
+        dict_error['test'][epoch] = error
 
         # remember best standard error and save checkpoint
-        is_best = std < best_std
-        best_std = min(std, best_std)
+        is_best = error < best_error
+        best_error = min(error, best_error)
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
-            'best_std': best_std,
+            'best_error': best_error,
             'optimizer': optimizer.state_dict(),
-            'dict_std': dict_std
+            'dict_error': dict_error
         }, is_best)
         
         # Save best model
@@ -257,14 +274,14 @@ def main():
     
     # Save error over epochs
     with open('./results/%s_%s.data'%(args.model_name, args.file_name), 'wb') as fp:
-        pickle.dump(dict_std, fp)
+        pickle.dump(dict_error, fp)
         
-    fileName = '%s_%s'%(args.model_name, args.file_name)
+    fileName = '%s_data%d_%s_%s_%s'%(args.model_name, args.data_cate, args.augmentation, args.loss_type, args.file_name)
     # Plot error curve
-    plot_std(dict_std['train'], dict_std['test'], fileName)
+    plot_error(dict_error['train'], dict_error['test'], fileName)
     
     # Plot scatter plots
-    _, target, pred = validate(test_loader, model, criterion)
+    _, target, pred, _ = validate(test_loader, model, criterion)
     plot_scatter(target, pred, fileName)
     
 
@@ -272,6 +289,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    std_errors = AverageMeter()
 
     # switch to train mode
     model.train()
@@ -302,6 +320,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        
+        # Record standard error
+        std_error = StandardError(output, target_var)
+        std_errors.update(std_error.data.item(), input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -322,11 +344,12 @@ def train(train_loader, model, criterion, optimizer, epoch):
         torch.cuda.empty_cache()
     
 
-    return (losses.avg)**0.5
+    return losses.avg, std_errors.avg
 
 def validate(val_loader, model, criterion):
     batch_time = AverageMeter()
     losses = AverageMeter()
+    std_errors = AverageMeter()
 
     # switch to evaluate mode
     model.eval()
@@ -349,9 +372,12 @@ def validate(val_loader, model, criterion):
         with torch.no_grad():
             output = model(input_var)
         loss = criterion(output, target_var)
-
+        
+        std_error = StandardError(output, target_var)
+        
         # measure accuracy and record loss
         losses.update(loss.data.item(), input.size(0))
+        std_errors.update(std_error.data.item(), input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -377,7 +403,7 @@ def validate(val_loader, model, criterion):
         del target
     torch.cuda.empty_cache()
 
-    return (losses.avg)**0.5, true, pred
+    return losses.avg, true, pred, std_errors.avg
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -403,11 +429,42 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
+def L4Loss(pred, target):
+    return torch.sum(torch.pow(target-pred, 4))/target.size()[0]
+
+def MyLoss(pred, target):
+    return torch.sum(torch.div(target, pred) * torch.abs(target-pred))/target.size()[0]
+
+def StandardError(pred, target):
+    return torch.sqrt(torch.sum(torch.pow(target-pred,2))/target.size()[0])
 
 def cal_r2(output, target):
+    '''
+    Calculate adjusted R squared
+
+    Parameters
+    ----------
+    output : TYPE
+        DESCRIPTION.
+    target : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    r2 : TYPE
+        DESCRIPTION.
+
+    '''
     
     output = output.cpu().numpy()
     target = target.cpu()
+    '''
+    SS_Residual = sum((y-yhat)**2)       
+    SS_Total = sum((y-np.mean(y))**2)     
+    r_squared = 1 - (float(SS_Residual))/SS_Total
+    adjusted_r_squared = 1 - (1-r_squared)*(len(y)-1)/(len(y)-X.shape[1]-1)
+    '''
+    
     r2 = r2_score(target, output)
     
     return r2
@@ -417,9 +474,9 @@ def set_parameter_requires_grad(model, feature_extracting):
         for param in model.parameters():
             param.requires_grad = False
 
-def plot_std(train, test, fileName):
+def plot_error(train, test, fileName):
     '''
-    Plot the standard error curve of training and testing data
+    Plot the error curve of training and testing data
 
     Parameters
     ----------
@@ -439,6 +496,7 @@ def plot_std(train, test, fileName):
     assert hasattr(test, '__iter__')
     
     epoch = list(range(len(train)))
+    
     plt.plot(epoch, train, 'r-', epoch, test, 'b--')
     plt.xlabel('Epoch')
     plt.ylabel('Standard error')

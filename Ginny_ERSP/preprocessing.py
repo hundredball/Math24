@@ -72,9 +72,9 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None, threshold=5.0):
         
     return ERSP_avg, SLs
 
-def scale(train, test):
+def center(train, test):
     '''
-    Standardize training and testing data
+    Center training and testing data
 
     Parameters
     ----------
@@ -91,13 +91,20 @@ def scale(train, test):
         Testing data after standardizing
 
     '''
-    assert isinstance(train, np.ndarray) and train.ndim==2
-    assert isinstance(test, np.ndarray) and test.ndim==2
+    assert isinstance(train, np.ndarray)
+    assert isinstance(test, np.ndarray)
     
+    '''
     scaler = skpp.StandardScaler().fit(train)
     
     test = scaler.transform(test)
     train = scaler.transform(train)
+    '''
+    
+    mean_train = np.mean(train, axis=0)
+    
+    test = test - mean_train
+    train = train - mean_train
     
     return train, test
     

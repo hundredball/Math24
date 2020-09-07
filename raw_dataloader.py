@@ -13,7 +13,7 @@ import os,sys,inspect
 
 root_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
-def extract_data(data, events, i_file, diff_type):
+def extract_data(data, events, i_file, diff_type, rm_baseline):
     '''
     Extract baseline data and solution time
 
@@ -28,6 +28,8 @@ def extract_data(data, events, i_file, diff_type):
         index of the file in data_list.csv
     diff_type : str
         difficulty of interest (1,2,3)
+    rm_baseline : str
+        Remove baseline before fixation
 
     Returns
     -------
@@ -42,8 +44,10 @@ def extract_data(data, events, i_file, diff_type):
 
     '''
     assert isinstance(diff_type, str)
+    assert isinstance(rm_baseline, bool)
     
     sampling_rate = 256
+    time_baseline = int(sampling_rate/2)
     num_channel = data.shape[0]
     num_epoch = sum([1 if x[1]==diff_type else 0 for x in events])
     X = np.zeros((num_epoch, num_channel, sampling_rate*2))
@@ -56,7 +60,12 @@ def extract_data(data, events, i_file, diff_type):
         event_type = event[1]
         
         if event_type == diff_type:
+            
             X[iter_event,:,:] = data[:, event_time-2*sampling_rate+1:event_time+1]
+            if rm_baseline:
+                baseline = np.mean(data[:, int(events[i-1,0])-time_baseline:int(events[i-1,0])], axis=1)
+                X[iter_event,:,:] -= baseline[:,np.newaxis] 
+            
             Y[iter_event] = int(events[i+1,0] - event_time)/sampling_rate
             iter_event += 1
             
@@ -91,7 +100,7 @@ def generate_class(Y_SL):
     return Y_class
     
     
-def read_data(diff_type, date = [0], pred_type = 'reg'):
+def read_data(diff_type, date = [0], pred_type = 'reg', rm_baseline = False):
     '''
     Load data from Data_Python and transform them into input and labels
 
@@ -103,6 +112,8 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         chosen dates
     pred_type : str
         regression (reg) or classification (class)
+    rm_baseline : bool
+        Remove baseline before fixation
 
     Returns
     -------
@@ -120,6 +131,7 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
     assert hasattr(diff_type, '__iter__')
     assert hasattr(date, '__iter__')
     assert all((isinstance(x, int) and 1<=x<=3) for x in diff_type)
+    assert isinstance(rm_baseline, bool)
     
     # Assign path depending on regression or classification
     if pred_type == 'reg':
@@ -174,7 +186,7 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
         X_sub, Y_sub, C_sub = {}, {}, {}
         
         for i_diff, diff in enumerate(diff_type):
-            X_sub[diff], Y_sub[diff], C_sub[diff] = extract_data(data, events, i_file, str(diff))
+            X_sub[diff], Y_sub[diff], C_sub[diff] = extract_data(data, events, i_file, str(diff), rm_baseline)
             
             X_list_diff_date[i_diff].append(X_sub[diff].copy())
             Y_list_diff_date[i_diff].append(Y_sub[diff].copy())
@@ -257,6 +269,6 @@ def read_data(diff_type, date = [0], pred_type = 'reg'):
 if __name__ == '__main__':
     
     # Test read_data
-    X, Y_class, Y_reg, C = read_data([1,2,3], list(range(11)), pred_type='class')
+    X, Y_class, Y_reg, C = read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline = True)
     print('X shape: ', X.shape)
     

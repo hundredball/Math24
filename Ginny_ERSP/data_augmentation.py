@@ -116,6 +116,7 @@ def SMOTER(data, target, threshold=None):
         new_target = np.zeros(num_new*num_minor)
         
         # Generate synthetic samples
+        
         if num_minor < 2:
             data_aug = np.concatenate((data_aug, minor_data), axis=0)
             target_aug = np.concatenate((target_aug, minor_target))
@@ -286,7 +287,7 @@ def add_noise_minority(data, target, params):
 def aug(data, target, method, params=None):
     
     assert isinstance(data, np.ndarray)
-    assert isinstance(target, np.ndarray) and target.ndim==1
+    assert isinstance(target, np.ndarray)
     assert data.shape[0] == target.shape[0]
     
     print('--- Data Augmentation (%s) ---'%(method))
@@ -304,6 +305,9 @@ def aug(data, target, method, params=None):
         data, target = add_noise(data, target, params)
     elif method == 'add_noise_minority':
         data, target = add_noise_minority(data, target, params)
+        
+    if len(ori_target_shape) == 2:
+        target = target.reshape((-1,1))
         
     print('> After %s'%(method))
     print('Mean of all trials: %f'%(np.mean(target)))

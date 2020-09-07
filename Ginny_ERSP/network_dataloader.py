@@ -5,14 +5,14 @@ from torch.utils import data
 import torch
 import pickle
 
-def getData(mode):
+def getData(root, mode):
     if mode == 'train':
-        img = pd.read_csv('./images/train_img.csv')
-        label = pd.read_csv('./images/train_label.csv')
+        img = pd.read_csv('./%s/train_img.csv'%(root))
+        label = pd.read_csv('./%s/train_label.csv'%(root))
         return img['fileName'].values, label['solution_time'].values
     else:
-        img = pd.read_csv('./images/test_img.csv')
-        label = pd.read_csv('./images/test_label.csv')
+        img = pd.read_csv('./%s/test_img.csv'%(root))
+        label = pd.read_csv('./%s/test_label.csv'%(root))
         return img['fileName'].values, label['solution_time'].values
 
 
@@ -28,7 +28,7 @@ class TopoplotLoader(data.Dataset):
             self.label (int or float list): Numerical list that store all ground truth label values.
         """
         self.root = root
-        self.img_name, self.label = getData(mode)
+        self.img_name, self.label = getData(root, mode)
         self.mode = mode
         self.num_time = num_time
         self.img_shape = np.zeros(3, dtype=int)

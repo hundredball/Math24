@@ -63,7 +63,7 @@ class ConvLSTM(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.sigmoid = nn.Sigmoid()
         
-        self.rnn = nn.LSTM(fc_hidden_size, rnn_hidden_size)
+        self.rnn = nn.LSTM(fc_hidden_size, rnn_hidden_size, num_layers=2)
         self.fc = nn.Linear(rnn_hidden_size, 1)
         
     def forward(self, x):

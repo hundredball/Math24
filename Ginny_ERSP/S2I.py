@@ -275,6 +275,7 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
     print('[%.1f] Finish S2I'%(time.time()-start_time))
 
 if __name__ == '__main__':
+    global args
     
     args = parser.parse_args()
     if args.data_cate == 1:
