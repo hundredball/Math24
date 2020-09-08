@@ -59,6 +59,7 @@ parser.add_argument('-c', '--center_flag', default=False, type=bool, help='Cente
 parser.add_argument('-b', '--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('-l', '--loss_type', default='L2', type=str, help='Loss type')
 parser.add_argument('-f', '--image_folder', default='images', type=str, help='Image folder (for image)')
+parser.add_argument('-s', '--scale_flag', default=False, type=bool, help='Scale image based on their original values')
 
 
 def main():
@@ -170,7 +171,8 @@ def main():
         print("Initializing Datasets and Dataloaders...")
 
         # Create training and testing datasets
-        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x]) for x in ['train', 'test']}
+        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x], scale=args.scale_flag)
+                          for x in ['train', 'test']}
 
         # Create training and testing dataloaders
         train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, num_workers=4)

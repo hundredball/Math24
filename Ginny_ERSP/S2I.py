@@ -60,7 +60,8 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
         
     num_example = ERSP.shape[0]
     fileNames = np.empty(num_example, dtype=object)
-    dict_img = {}
+    #dict_img = {}
+    dict_scaler = {}
     
     start_time = time.time()
     print('[%f] Generating topoplots...'%(time.time()-start_time))
@@ -92,6 +93,8 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
         # Topoplot
 
         for i_data in range(num_example):
+            min_ = {}
+            scale = {}
 
             # Plot topo for each band
             for i_band in range(3):
@@ -108,26 +111,33 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
                 plot_loc = np.zeros((num_channels, 2)) # first for x, second for y
                 plot_loc[:,0] = scale_arc*np.cos(np.array(channel_info[:,2]*np.pi/180, dtype = np.float))
                 plot_loc[:,1] = scale_arc*np.sin(np.array(channel_info[:,2]*np.pi/180, dtype = np.float))
+                
+                # Set pixel values 0~1
+                min_[i_band] = np.min(bandpower[i_data,:,i_band])
+                channel_values = bandpower[i_data,:,i_band]-min_[i_band]
+                scale[i_band] = np.max(channel_values)
+                channel_values = channel_values/scale[i_band]
 
-
-                # Add couple of zeros to outline for interpolation
+                # Add couple of min values to outline for interpolation
                 add_x = np.reshape(radius*np.cos(angles), (len(angles), 1))
                 add_y = np.reshape(radius*np.sin(angles), (len(angles), 1))
                 add_element = np.concatenate((add_x, add_y), axis=1)
                 plot_loc = np.concatenate((plot_loc, add_element), axis=0)
-                channel_values = np.concatenate((bandpower[i_data,:,i_band], np.zeros(len(angles))))
+                channel_values = np.concatenate((channel_values, np.zeros(len(angles))))
 
                 # Interpolate 
                 angles = np.repeat(angles[..., np.newaxis], n_radii, axis=1) 
                 x = (radii * np.cos(angles)).flatten()
                 y = (radii * np.sin(angles)).flatten()
                 z = griddata(plot_loc, channel_values, (x, y), method = 'cubic', fill_value=0, rescale=True)
+
                 triang = tri.Triangulation(x, y)
                 ax.set_xlim((-1, 1))
                 ax.set_ylim((-1, 1))
                 tcf = ax.tricontourf(triang, z, cmap = cmap_name[i_band], levels=50)   # Reds, Greens, Blues
                 #fig.colorbar(tcf)
-
+                
+                '''
                 # Add nose
                 radius = 0.4   # radius on the plot
                 height = (radius**2-0.04**2)**0.5
@@ -141,6 +151,7 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
                 ax.plot([0.91,0.96], [0.05, 0.1], color='black')
                 ax.plot([0.96,0.96], [0.1, -0.1], color='black')
                 ax.plot([0.96,0.91], [-0.1, -0.05], color='black')
+                '''
 
                 ax.axis('off')
                 plt.savefig('./images/%s.png'%(band_name[i_band]))
@@ -151,15 +162,31 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
             figure_g = plt.imread('./images/%s.png'%(band_name[1]))
             figure_b = plt.imread('./images/%s.png'%(band_name[2]))
             
+            figure_r, figure_g, figure_b = figure_r[:,:,:3], figure_g[:,:,:3], figure_b[:,:,:3]
+            
+            # Scale back 
+            figure_r = figure_r*scale[0]+min_[0]
+            figure_g = figure_g*scale[1]+min_[1]
+            figure_b = figure_b*scale[2]+min_[2]
+            
+            figure_mix = (figure_r+figure_g+figure_b)/3
+            
+            # Scale each channels from 0~1
+            for i_channel in range(3):
+                min_[i_channel] = np.min(figure_mix[:,:,i_channel])
+                figure_mix[:,:,i_channel] -= min_[i_channel]
+                scale[i_channel] = np.max(figure_mix[:,:,i_channel])
+                figure_mix[:,:,i_channel] /= scale[i_channel]
+            
             if i_data in train_indices:
                 dirName = 'train'
             else:
                 dirName = 'test'
-
-            figure_mix = (figure_r+figure_g+figure_b)/3
+            
             fileName = '%d_mix_%d'%(i_data, i_time)
             plt.imsave('./images/%s/%s.png'%(dirName, fileName), figure_mix)
             # dict_img[fileName] = np.floor(figure_mix*255)
+            dict_scaler[fileName] = {'min_':min_, 'scale':scale}
 
             # Only save fileNames for the first time step
             if i_time == 0:
@@ -167,8 +194,9 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
         
     print('[%f] Finished all topoplots!'%(time.time()-start_time))
     
-    with open('./images/img.data', 'wb') as fp:
-        pickle.dump(dict_img, fp)
+    with open('./images/scaler.data', 'wb') as fp:
+        pickle.dump(dict_scaler, fp)
+    
         
     return fileNames
     
@@ -277,6 +305,7 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
 if __name__ == '__main__':
     global args
     
+    dict_save = {}
     args = parser.parse_args()
     if args.data_cate == 1:
         ERSP_all, tmp_all, freqs = dataloader.load_data()

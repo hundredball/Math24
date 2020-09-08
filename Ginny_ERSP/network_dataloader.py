@@ -17,7 +17,7 @@ def getData(root, mode):
 
 
 class TopoplotLoader(data.Dataset):
-    def __init__(self, root, mode, num_time=1, transform=None):
+    def __init__(self, root, mode, num_time=1, transform=None, scale=False):
         """
         Args:
             root (string): Root path of the dataset.
@@ -33,10 +33,16 @@ class TopoplotLoader(data.Dataset):
         self.num_time = num_time
         self.img_shape = np.zeros(3, dtype=int)
         self.transform = transform
+        self.scale=scale
         '''
         with open('./images/img.data', 'rb') as fp:
             self.dict_img = pickle.load(fp)
         '''
+        
+        if self.scale:
+            print('Load scaler...')
+            with open('%s/scaler.data'%(self.root), 'rb') as fp:
+                self.dict_scaler = pickle.load(fp)
         
         print("> Found %d images, %d examples" % (len(self.img_name)*self.num_time, len(self.img_name)))
 
@@ -80,8 +86,14 @@ class TopoplotLoader(data.Dataset):
             # set to pixel value to 0~1
             img = img/255
 
-            # Choose first three channels of color
+            # Choose RGB
             img = img[:,:,:3]
+            
+            # Scale back
+            if self.scale:
+                for i_channel in range(3):
+                    img[:,:,i_channel] = img[:,:,i_channel] * self.dict_scaler[fileName]['scale'][i_channel]\
+                        + self.dict_scaler[fileName]['min_'][i_channel]
             
             if i_time == 0:
                 imgs = np.zeros((self.num_time, img.shape[0], img.shape[1], img.shape[2]))
