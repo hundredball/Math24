@@ -6,7 +6,7 @@ import signal
 import matplotlib.pyplot as plt
 import numpy as np
 import pickle
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
 from sklearn.decomposition import PCA
@@ -38,7 +38,6 @@ from eegnet import
 '''
 import models as models
 
-best_error = 100
 # select gpus
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
@@ -48,39 +47,55 @@ parser.add_argument('-m', '--model_name', default='vgg16', help='Model for predi
 parser.add_argument('-i', '--input_type', default='image', help='Input type of the model')
 parser.add_argument('-e', '--num_epoch', default=100, type=int, help='Number of epochs')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')
+                    help='path to latest checkpoint (default: none), only for hold-out method')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
+parser.add_argument('--start_exp', default=0, type=int, help='manual experiment number (useful on restarts)')
 parser.add_argument('-n', '--file_name', default = '', help='filename after model_name')
-parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data (for power)')
+parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
 parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frame for each example')
 parser.add_argument('-a', '--augmentation', default=None, type=str, help='Way of data augmentation')
 parser.add_argument('-c', '--center_flag', default=False, type=bool, help='Center data before feeding into the net')
 parser.add_argument('-b', '--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('-l', '--loss_type', default='L2', type=str, help='Loss type')
 parser.add_argument('-f', '--image_folder', default='images', type=str, help='Image folder (for image)')
-parser.add_argument('-s', '--scale_flag', default=False, type=bool, help='Scale image based on their original values')
+parser.add_argument('--num_fold', default=1, type=int, help='Number of fold for cross validation')
+parser.add_argument('--scale', dest='scale', action='store_true', help='Scale image based on their original values')
+parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate the trained model')
 
-
-def main():
-    global best_error, device, num_epoch, args
+def main(index_exp):
     
     faulthandler.enable()
+    torch.cuda.empty_cache()
     
-    args = parser.parse_args()
+    best_error = 100
     lr_step = [40, 70, 120]
     multiframe = ['convlstm', 'convfc']
+    dirName = '%s_data%d_%s_%s_%s'%(args.model_name, args.data_cate, args.augmentation, args.loss_type, args.file_name)
+    fileName = '%s_exp%d'%(dirName, index_exp)
     
-    torch.cuda.empty_cache()
+    # Create folder for results of this model
+    if not os.path.exists('./results/%s'%(dirName)):
+        os.makedirs('./results/%s'%(dirName))
     
     # ------------- Wrap up dataloader -----------------
     if args.input_type == 'signal':
-        X, Y_class, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline=True)
+        X, _, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline=True)
+        
+        # Remove trials
+        X, Y_reg = preprocessing.remove_trials(X, Y_reg, threshold=60)
         
         # Split data
-        train_data, test_data, train_target, test_target = train_test_split(X, Y_reg, test_size=0.1, random_state=23)
-        # Random state 15: training error becomes lower, testing error becomes higher
-        
+        if args.num_fold == 1:
+            train_data, test_data, train_target, test_target = train_test_split(X, Y_reg, test_size=0.1, random_state=23)
+            # Random state 15: training error becomes lower, testing error becomes higher
+        else:
+            kf = KFold(n_splits=args.num_fold, shuffle=True, random_state=23)
+            for i, (train_index, test_index) in kf.split(X):
+                if i == index_exp:
+                    train_data, train_target = X[train_index, :], Y_reg[train_index]
+                    test_data, test_target = X[test_index, :], Y_reg[test_index]
+                    
         # Data augmentation
         if args.augmentation == 'overlapping':
             train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation,
@@ -119,10 +134,20 @@ def main():
             with open('./ERSP_from_raw_rb.data', 'rb') as fp:
                 dict_ERSP = pickle.load(fp)
             ERSP_all, tmp_all = dict_ERSP['ERSP'], dict_ERSP['SLs']
+            
+        # Remove trials
+        ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, threshold=60)
         
         # Set split indices
         indices = {}
-        indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=40)
+        if args.num_fold == 1:
+            indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=40)
+        else:
+            kf = KFold(n_splits=args.num_fold, shuffle=True, random_state=23)
+            for i, (train_index, test_index) in kf.split(X):
+                if i == index_exp:
+                    indices['train'] = train_index
+                    indices['test'] = test_index
         
         # Standardize data
         ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices = indices['train'])
@@ -171,7 +196,7 @@ def main():
         print("Initializing Datasets and Dataloaders...")
 
         # Create training and testing datasets
-        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x], scale=args.scale_flag)
+        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x], scale=args.scale, index_exp=index_exp)
                           for x in ['train', 'test']}
 
         # Create training and testing dataloaders
@@ -228,6 +253,16 @@ def main():
     # Record loss and accuracy of each epoch
     dict_error = {'train': list(range(args.num_epoch)), 'test': list(range(args.num_epoch))}
     
+    # optionally evaluate the trained model
+    if args.evaluate:
+        if args.resume:
+            if os.path.isfile(args.resume):
+                model.load_state_dict(torch.load(args.resume))
+                
+        _, target, pred, _ = validate(test_loader, model, criterion)
+        plot_scatter(target, pred, dirName, fileName)
+        return 0
+    
     # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -237,14 +272,15 @@ def main():
             best_error = checkpoint['best_error']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            dict_error = checkpoint['dict_error']
+            dict_error['train'][:args.start_epoch] = checkpoint['dict_error']['train']
+            dict_error['test'][:args.start_epoch] = checkpoint['dict_error']['test']
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     
     # ------------- Train model ------------------
-    
+
     for epoch in range(args.start_epoch, args.num_epoch):
         
         # Learning rate decay
@@ -272,19 +308,18 @@ def main():
         
         # Save best model
         if is_best:
-            torch.save(model.state_dict(), './results/best_%s_%s.pt'%(args.model_name, args.file_name))
+            torch.save(model.state_dict(), './results/%s/best_%s.pt'%(dirName, fileName))
     
     # Save error over epochs
-    with open('./results/%s_%s.data'%(args.model_name, args.file_name), 'wb') as fp:
+    with open('./results/%s/%s.data'%(dirName, fileName), 'wb') as fp:
         pickle.dump(dict_error, fp)
         
-    fileName = '%s_data%d_%s_%s_%s'%(args.model_name, args.data_cate, args.augmentation, args.loss_type, args.file_name)
     # Plot error curve
-    plot_error(dict_error['train'], dict_error['test'], fileName)
+    plot_error(dict_error['train'], dict_error['test'], dirName, fileName)
     
     # Plot scatter plots
     _, target, pred, _ = validate(test_loader, model, criterion)
-    plot_scatter(target, pred, fileName)
+    plot_scatter(target, pred, dirName, fileName)
     
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -476,7 +511,7 @@ def set_parameter_requires_grad(model, feature_extracting):
         for param in model.parameters():
             param.requires_grad = False
 
-def plot_error(train, test, fileName):
+def plot_error(train, test, dirName, fileName):
     '''
     Plot the error curve of training and testing data
 
@@ -486,6 +521,8 @@ def plot_error(train, test, fileName):
         Training standard error
     test : itertor
         Testing standard error
+    dirName : str
+        Directory after results
     fileName : string, optional
         Name for file and title
 
@@ -496,6 +533,8 @@ def plot_error(train, test, fileName):
     '''
     assert hasattr(train, '__iter__')
     assert hasattr(test, '__iter__')
+    assert isinstance(dirName, str)
+    assert isinstance(fileName, str)
     
     epoch = list(range(len(train)))
     
@@ -505,9 +544,9 @@ def plot_error(train, test, fileName):
     plt.title('%s : (%.3f,%.3f)'%(fileName, min(train), min(test)))
     plt.legend(('Train', 'Test'))
     
-    plt.savefig('./results/%s_error.png'%(fileName))
+    plt.savefig('./results/%s/%s_error.png'%(dirName, fileName))
     
-def plot_scatter(true, pred, fileName):
+def plot_scatter(true, pred, dirName, fileName):
     '''
     Plot the scatter plots of true target and prediction
 
@@ -517,6 +556,8 @@ def plot_scatter(true, pred, fileName):
         Target
     pred : iterator
         Prediction
+    dirName : str
+        Directory after results
     fileName : str
         File name
 
@@ -527,6 +568,7 @@ def plot_scatter(true, pred, fileName):
     '''
     assert hasattr(true, '__iter__')
     assert hasattr(pred, '__iter__')
+    assert isinstance(dirName, str)
     assert isinstance(fileName, str)
     
     sort_indices = np.argsort(true)
@@ -546,7 +588,12 @@ def plot_scatter(true, pred, fileName):
     
     plt.suptitle(fileName)
     
-    plt.savefig('./results/%s_scatter.png'%(fileName))
+    plt.savefig('./results/%s/%s_scatter.png'%(dirName, fileName))
 
 if __name__ == '__main__':
-    main()
+    global device, args
+    args = parser.parse_args()
+    
+    for i_exp in range(args.start_exp, args.num_fold):
+        print('--- Experiment %d ---'%(i_exp))
+        main(i_exp)

@@ -7,14 +7,15 @@ Created on Sat Jul 25 14:39:12 2020
 """
 
 import numpy as np
-from scipy.interpolate import griddata
 import pandas as pd
 import matplotlib.tri as tri
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+from scipy.interpolate import griddata
+from sklearn.model_selection import train_test_split, KFold
 import time
 import argparse
 import pickle
+import os
 
 import dataloader
 import preprocessing
@@ -24,9 +25,11 @@ parser = argparse.ArgumentParser(description='Signal to image')
 parser.add_argument('-m', '--mode', default='normal', type=str, help='Generating method')
 parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
 parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frames for each example')
+parser.add_argument('-r', '--remove_threshold', default=0.0, type=float, help='SL threshold for removing trials')
+parser.add_argument('-f', '--num_fold', default=1, type=int, help='Number of folds of cross validation')
 
 
-def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
+def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0):
     '''
     Generate mixed topoplot
 
@@ -52,6 +55,7 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
         train_indices = np.arange(ERSP.shape[0])
     else:
         assert isinstance(train_indices, np.ndarray) and train_indices.ndim==1
+    assert isinstance(index_exp, int)
     
     if ERSP.ndim==3:
         ERSP_all = np.expand_dims(ERSP, axis=3)
@@ -184,7 +188,7 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
                 dirName = 'test'
             
             fileName = '%d_mix_%d'%(i_data, i_time)
-            plt.imsave('./images/%s/%s.png'%(dirName, fileName), figure_mix)
+            plt.imsave('./images/exp%d/%s/%s.png'%(index_exp, dirName, fileName), figure_mix)
             # dict_img[fileName] = np.floor(figure_mix*255)
             dict_scaler[fileName] = {'min_':min_, 'scale':scale}
 
@@ -194,13 +198,13 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None):
         
     print('[%f] Finished all topoplots!'%(time.time()-start_time))
     
-    with open('./images/scaler.data', 'wb') as fp:
+    with open('./images/exp%d/scaler.data'%(index_exp), 'wb') as fp:
         pickle.dump(dict_scaler, fp)
     
         
     return fileNames
     
-def split(fileNames, SLs, test_size=0.1, random=True):
+def split(fileNames, SLs, test_size=0.1, random=True, index_exp=0):
     '''
     Split training and testing set by creating csv files for referencing
 
@@ -226,6 +230,7 @@ def split(fileNames, SLs, test_size=0.1, random=True):
     assert (random and isinstance(test_size, float) and 0<=test_size<=1) or\
         ((not random) and isinstance(test_size, int) and 0<=test_size<=fileNames.shape[0])
     assert fileNames.shape[0] == SLs.shape[0]
+    assert isinstance(index_exp, int)
     
     # Split for training and testing data
     if not random:
@@ -236,20 +241,20 @@ def split(fileNames, SLs, test_size=0.1, random=True):
     
     # Save csv for dataloader
     X_train_df = pd.DataFrame({'fileName':X_train})
-    X_train_df.to_csv('./images/train_img.csv')
+    X_train_df.to_csv('./images/exp%d/train_img.csv'%(index_exp))
     
     X_test_df = pd.DataFrame({'fileName':X_test})
-    X_test_df.to_csv('./images/test_img.csv')
+    X_test_df.to_csv('./images/exp%d/test_img.csv'%(index_exp))
     
     Y_train_df = pd.DataFrame({'solution_time':Y_train})
-    Y_train_df.to_csv('./images/train_label.csv')
+    Y_train_df.to_csv('./images/exp%d/train_label.csv'%(index_exp))
     
     Y_test_df = pd.DataFrame({'solution_time':Y_test})
-    Y_test_df.to_csv('./images/test_label.csv')
+    Y_test_df.to_csv('./images/exp%d/test_label.csv'%(index_exp))
     
     print('Generate files for dataset referencing')
     
-def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
+def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time, index_exp=0):
     '''
     Standardize data, then generate topo
 
@@ -265,6 +270,8 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
         Indices of training and testing data
     mode : string
         Multiframe or single frame or SMOTE
+    index_exp : int
+        Index of experiment for K-fold cross validation
 
     Returns
     -------
@@ -277,6 +284,13 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
     assert isinstance(indices, dict)
     assert isinstance(mode, str)
     assert isinstance(num_time, int)
+    assert isinstance(index_exp, int)
+    
+    # Create folder for exp and train, test
+    if not os.path.exists('./images/exp%d'%(index_exp)):
+        os.makedirs('./images/exp%d'%(index_exp))
+        os.makedirs('./images/exp%d/train'%(index_exp))
+        os.makedirs('./images/exp%d/test'%(index_exp))
     
     # Standardize the data
     ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'])
@@ -297,14 +311,19 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time):
     start_time = time.time()
     print('[%.1f] Signal to image (%s)'%(time.time()-start_time, mode))
     
-    fileNames = generate_topo(ERSP_concat, freqs, num_time, np.arange(ERSP_dict['train'].shape[0]))
-    split(fileNames, SLs_concat, len(SLs_dict['test']), random = False)
+    fileNames = generate_topo(ERSP_concat, freqs, num_time, np.arange(ERSP_dict['train'].shape[0]), index_exp)
+    split(fileNames, SLs_concat, len(SLs_dict['test']), random = False, index_exp=index_exp)
     
     print('[%.1f] Finish S2I'%(time.time()-start_time))
 
 if __name__ == '__main__':
     global args
     
+    # Create folder for saving those images
+    if not os.path.exists('./images'):
+        os.makedirs('./images')
+        
+    # Load data
     dict_save = {}
     args = parser.parse_args()
     if args.data_cate == 1:
@@ -314,10 +333,20 @@ if __name__ == '__main__':
             dict_ERSP = pickle.load(fp)
         ERSP_all, tmp_all, freqs = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq']
         print('Shape of ERSP_all: ', ERSP_all.shape)
+        
+    ERSP_all, tmp_all = ERSP_all[:10], tmp_all[:10]
+    
+    # Remove trials
+    ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, args.remove_threshold)
     
     # Split data
     indices = {}
-    indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
-    
-    S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time)
+    if args.num_fold == 1:
+        indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
+        S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time)
+    else:
+        kf = KFold(n_splits=args.num_fold, shuffle=True, random_state=23)
+        for i, (indices['train'], indices['test']) in enumerate(kf.split(ERSP_all)):
+            print('--- Experiment %d ---'%(i))
+            S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time, index_exp=i)
     

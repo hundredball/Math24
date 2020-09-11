@@ -5,19 +5,19 @@ from torch.utils import data
 import torch
 import pickle
 
-def getData(root, mode):
+def getData(root, mode, index_exp):
     if mode == 'train':
-        img = pd.read_csv('./%s/train_img.csv'%(root))
-        label = pd.read_csv('./%s/train_label.csv'%(root))
+        img = pd.read_csv('./%s/exp%d/train_img.csv'%(root, index_exp))
+        label = pd.read_csv('./%s/exp%d/train_label.csv'%(root, index_exp))
         return img['fileName'].values, label['solution_time'].values
     else:
-        img = pd.read_csv('./%s/test_img.csv'%(root))
-        label = pd.read_csv('./%s/test_label.csv'%(root))
+        img = pd.read_csv('./%s/exp%d/test_img.csv'%(root, index_exp))
+        label = pd.read_csv('./%s/exp%d/test_label.csv'%(root, index_exp))
         return img['fileName'].values, label['solution_time'].values
 
 
 class TopoplotLoader(data.Dataset):
-    def __init__(self, root, mode, num_time=1, transform=None, scale=False):
+    def __init__(self, root, mode, num_time=1, transform=None, scale=False, index_exp=0):
         """
         Args:
             root (string): Root path of the dataset.
@@ -28,12 +28,13 @@ class TopoplotLoader(data.Dataset):
             self.label (int or float list): Numerical list that store all ground truth label values.
         """
         self.root = root
-        self.img_name, self.label = getData(root, mode)
+        self.img_name, self.label = getData(root, mode, index_exp)
         self.mode = mode
         self.num_time = num_time
         self.img_shape = np.zeros(3, dtype=int)
         self.transform = transform
         self.scale=scale
+        self.index_exp = index_exp
         '''
         with open('./images/img.data', 'rb') as fp:
             self.dict_img = pickle.load(fp)
@@ -74,7 +75,7 @@ class TopoplotLoader(data.Dataset):
             
             fileName = self.img_name[index][:-1] + str(i_time)
             
-            path = '%s/%s/%s.png'%(self.root, self.mode, fileName)
+            path = '%s/exp%d/%s/%s.png'%(self.root, self.index_exp, self.mode, fileName)
             label = self.label[index]
             img = io.imread(path)
             
