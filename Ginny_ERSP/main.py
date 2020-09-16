@@ -2,14 +2,9 @@ import argparse
 import shutil
 import time
 import faulthandler
-import signal
-import matplotlib.pyplot as plt
 import numpy as np
 import pickle
 from sklearn.model_selection import train_test_split, KFold
-from sklearn.metrics import mean_squared_error
-from sklearn.metrics import r2_score
-from sklearn.decomposition import PCA
 
 import torch
 import torch.nn as nn
@@ -25,45 +20,43 @@ import dataloader
 import preprocessing
 import data_augmentation
 import network_dataloader as ndl
+from evaluate_result import plot_error, plot_scatter
 
 import os,sys,inspect
 current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir) 
 import raw_dataloader
-'''
-from mynet import mynet
-from RCNN import *
-from eegnet import 
-'''
 import models as models
 
-# select gpus
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print(device)
-
-parser = argparse.ArgumentParser(description='Math24 project')
+parser = argparse.ArgumentParser(description='Deep learning model training')
 parser.add_argument('-m', '--model_name', default='vgg16', help='Model for predicting solution latency')
 parser.add_argument('-i', '--input_type', default='image', help='Input type of the model')
 parser.add_argument('-e', '--num_epoch', default=100, type=int, help='Number of epochs')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none), only for hold-out method')
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
-                    help='manual epoch number (useful on restarts)')
-parser.add_argument('--start_exp', default=0, type=int, help='manual experiment number (useful on restarts)')
 parser.add_argument('-n', '--file_name', default = '', help='filename after model_name')
 parser.add_argument('-d', '--data_cate', default=1, type=int, help='Category of data')
 parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of frame for each example')
 parser.add_argument('-a', '--augmentation', default=None, type=str, help='Way of data augmentation')
-parser.add_argument('-c', '--center_flag', default=False, type=bool, help='Center data before feeding into the net')
 parser.add_argument('-b', '--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('-l', '--loss_type', default='L2', type=str, help='Loss type')
 parser.add_argument('-f', '--image_folder', default='images', type=str, help='Image folder (for image)')
 parser.add_argument('--num_fold', default=1, type=int, help='Number of fold for cross validation')
+parser.add_argument('--num_split', default=1, type=int, help='Number of split cluster for ensemble methods')
+parser.add_argument('--normalize', dest='normalize', action='store_true', help='Normalize data before data augmentation')
 parser.add_argument('--scale', dest='scale', action='store_true', help='Scale image based on their original values')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate the trained model')
 
-def main(index_exp):
+parser.add_argument('--ensemble', default='', type=str, help='Path to models for ensemble learning')
+parser.add_argument('--pre_model_name', default='convfc', type=str, help='Pre models for ensemble learning')
+parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: none), only for hold-out method')
+
+parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                    help='manual epoch number (useful on restarts)')
+parser.add_argument('--start_exp', default=0, type=int, help='manual experiment number (useful on restarts)')
+parser.add_argument('--start_split', default=0, type=int, help='manual split cluster (useful on restarts)')
+
+def main(index_exp, index_split):
     
     faulthandler.enable()
     torch.cuda.empty_cache()
@@ -72,7 +65,7 @@ def main(index_exp):
     lr_step = [40, 70, 120]
     multiframe = ['convlstm', 'convfc']
     dirName = '%s_data%d_%s_%s_%s'%(args.model_name, args.data_cate, args.augmentation, args.loss_type, args.file_name)
-    fileName = '%s_exp%d'%(dirName, index_exp)
+    fileName = '%s_split%d_exp%d'%(dirName, index_split, index_exp)
     
     # Create folder for results of this model
     if not os.path.exists('./results/%s'%(dirName)):
@@ -81,6 +74,8 @@ def main(index_exp):
     # ------------- Wrap up dataloader -----------------
     if args.input_type == 'signal':
         X, _, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline=True)
+        num_channel = X.shape[1]
+        num_sample = X.shape[2]     # Number of time sample
         
         # Remove trials
         X, Y_reg = preprocessing.remove_trials(X, Y_reg, threshold=60)
@@ -95,6 +90,10 @@ def main(index_exp):
                 if i == index_exp:
                     train_data, train_target = X[train_index, :], Y_reg[train_index]
                     test_data, test_target = X[test_index, :], Y_reg[test_index]
+                    
+        # Normalize the data
+        if args.normalize:
+            train_data, test_data = preprocessing.normalize(train_data, test_data)
                     
         # Data augmentation
         if args.augmentation == 'overlapping':
@@ -112,12 +111,10 @@ def main(index_exp):
             train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation)
             
         if args.model_name == 'eegnet':
-            len_time = train_data.shape[2]
             # (sample, channel, time) -> (sample, channel_NN, channel_EEG, time)
-            [train_data, test_data] = [X.reshape((X.shape[0], 1, X.shape[1], X.shape[2])) \
+            [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_sample)) \
                                        for X in [train_data, test_data]]
-        if args.center_flag:
-            train_data, test_data = preprocessing.center(train_data, test_data)
+        
         
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
@@ -126,6 +123,8 @@ def main(index_exp):
 
         train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
         test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
+        
+        model_param = [train_data.shape]
         
     elif args.input_type == 'power':
         if args.data_cate == 1:
@@ -173,12 +172,14 @@ def main(index_exp):
         train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
         test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
         
+        model_param = [train_data.shape]
+        
     elif args.input_type == 'image':
         
         assert (args.model_name in multiframe) == (args.num_time>1)
         
         # Let input size be 224x224 if the model is vgg16
-        if args.model_name == 'vgg16':
+        if args.model_name in ['vgg16', 'resnet50']:
             input_size = 224
         else:
             input_size = 64
@@ -196,36 +197,32 @@ def main(index_exp):
         print("Initializing Datasets and Dataloaders...")
 
         # Create training and testing datasets
-        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x], scale=args.scale, index_exp=index_exp)
-                          for x in ['train', 'test']}
+        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x],
+                        scale=args.scale, index_exp=index_exp, index_split=index_split) for x in ['train', 'test']}
 
         # Create training and testing dataloaders
         train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, num_workers=4)
         test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.batch_size, shuffle=False, num_workers=4)
         
+        model_param = [input_size]
         
     # ------------ Create model ---------------
+    if args.input_type == 'image':
+        model_param = [input_size]
+    else:
+        model_param = [train_data.shape]
     
-    if args.model_name == 'mynet':
-        model = models.__dict__[args.model_name](train_data.shape[1])
-    elif args.model_name == 'vgg16':
-        model = tv_models.vgg16(pretrained=True)
-        set_parameter_requires_grad(model, True)
-        
-        model.classifier[0] = nn.Linear(model.classifier[0].in_features, model.classifier[0].out_features)
-        model.classifier[1] = nn.Sigmoid()
-        model.classifier[3] = nn.Linear(model.classifier[3].in_features, model.classifier[3].out_features)
-        model.classifier[4] = nn.Sigmoid()
-        
-        model.classifier[6] = nn.Linear(model.classifier[6].in_features,1)
-    elif args.model_name == 'convnet':
-        model = models.__dict__[args.model_name](input_size)
-    elif args.model_name == 'convlstm':
-        model = models.__dict__[args.model_name](input_size, 64, 32, args.num_time)
-    elif args.model_name == 'convfc':
-        model = models.__dict__[args.model_name](input_size, 32, args.num_time)
-    elif args.model_name == 'eegnet':
-        model = models.__dict__[args.model_name](nn.ReLU(), (train_data.shape[2], train_data.shape[3]), len_time, D=3)
+    if not args.ensemble:
+        model = read_model(args.model_name, model_param)
+    else:
+        pre_models = []
+        for i in range(args.num_split):
+            pre_model = read_model(args.pre_model_name, model_param)
+            pre_model.load_state_dict( torch.load('%s/best_model%d.pt'%(args.ensemble, i)) )
+            set_parameter_requires_grad(pre_model, True)
+            pre_models.append(pre_model)
+            
+        model = models.__dict__[args.model_name](pre_models)
         
     print('Use model %s'%(args.model_name))
         
@@ -234,7 +231,6 @@ def main(index_exp):
     
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    
 
     # define loss function (criterion) and optimizer
     if args.loss_type == 'L2':
@@ -251,7 +247,8 @@ def main(index_exp):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     
     # Record loss and accuracy of each epoch
-    dict_error = {'train': list(range(args.num_epoch)), 'test': list(range(args.num_epoch))}
+    dict_error = {'train_std': list(range(args.num_epoch)), 'test_std': list(range(args.num_epoch)),
+                  'train_MAPE': list(range(args.num_epoch)), 'test_MAPE': list(range(args.num_epoch))}
     
     # optionally evaluate the trained model
     if args.evaluate:
@@ -259,7 +256,7 @@ def main(index_exp):
             if os.path.isfile(args.resume):
                 model.load_state_dict(torch.load(args.resume))
                 
-        _, target, pred, _ = validate(test_loader, model, criterion)
+        _, target, pred, _, _ = validate(test_loader, model, criterion)
         plot_scatter(target, pred, dirName, fileName)
         return 0
     
@@ -272,8 +269,8 @@ def main(index_exp):
             best_error = checkpoint['best_error']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            dict_error['train'][:args.start_epoch] = checkpoint['dict_error']['train']
-            dict_error['test'][:args.start_epoch] = checkpoint['dict_error']['test']
+            dict_error['train_std'][:args.start_epoch] = checkpoint['dict_error']['train_std']
+            dict_error['test_std'][:args.start_epoch] = checkpoint['dict_error']['test_std']
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
         else:
@@ -289,15 +286,16 @@ def main(index_exp):
                 param_group['lr'] *= 0.1
         
         # train for one epoch
-        _, dict_error['train'][epoch] = train(train_loader, model, criterion, optimizer, epoch)
+        _, dict_error['train_std'][epoch], dict_error['train_MAPE'][epoch] = \
+            train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
-        _, _, _, error = validate(test_loader, model, criterion)
-        dict_error['test'][epoch] = error
+        _, _, _, std_error, dict_error['test_MAPE'][epoch] = validate(test_loader, model, criterion)
+        dict_error['test_std'][epoch] = std_error
 
         # remember best standard error and save checkpoint
-        is_best = error < best_error
-        best_error = min(error, best_error)
+        is_best = std_error < best_error
+        best_error = min(std_error, best_error)
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
@@ -308,18 +306,20 @@ def main(index_exp):
         
         # Save best model
         if is_best:
-            torch.save(model.state_dict(), './results/%s/best_%s.pt'%(dirName, fileName))
+            torch.save(model.state_dict(), './results/%s/best_model%d.pt'%(dirName, index_split))
+        if epoch == args.num_epoch-1:
+            torch.save(model.state_dict(), './results/%s/last_model%d.pt'%(dirName, index_split))
+    # Plot error curve
+    plot_error(dict_error, dirName, fileName)
+    
+    # Plot scatter plots
+    _, target, pred, _, _ = validate(test_loader, model, criterion)
+    plot_scatter(target, pred, dirName, fileName)
+    dict_error['target'], dict_error['pred'] = target, pred
     
     # Save error over epochs
     with open('./results/%s/%s.data'%(dirName, fileName), 'wb') as fp:
         pickle.dump(dict_error, fp)
-        
-    # Plot error curve
-    plot_error(dict_error['train'], dict_error['test'], dirName, fileName)
-    
-    # Plot scatter plots
-    _, target, pred, _ = validate(test_loader, model, criterion)
-    plot_scatter(target, pred, dirName, fileName)
     
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -327,6 +327,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     data_time = AverageMeter()
     losses = AverageMeter()
     std_errors = AverageMeter()
+    MAPEs = AverageMeter()
 
     # switch to train mode
     model.train()
@@ -358,9 +359,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
         loss.backward()
         optimizer.step()
         
-        # Record standard error
+        # Record error
         std_error = StandardError(output, target_var)
         std_errors.update(std_error.data.item(), input.size(0))
+        mape = MAPE(output, target_var)
+        MAPEs.update(mape.data.item(), input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -379,14 +382,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
         del input
         del target
         torch.cuda.empty_cache()
-    
 
-    return losses.avg, std_errors.avg
+    return losses.avg, std_errors.avg, MAPEs.avg
 
 def validate(val_loader, model, criterion):
     batch_time = AverageMeter()
     losses = AverageMeter()
     std_errors = AverageMeter()
+    MAPEs = AverageMeter()
 
     # switch to evaluate mode
     model.eval()
@@ -410,11 +413,13 @@ def validate(val_loader, model, criterion):
             output = model(input_var)
         loss = criterion(output, target_var)
         
-        std_error = StandardError(output, target_var)
-        
         # measure accuracy and record loss
+        std_error = StandardError(output, target_var)
+        mape = MAPE(output, target_var)
+        
         losses.update(loss.data.item(), input.size(0))
         std_errors.update(std_error.data.item(), input.size(0))
+        MAPEs.update(mape.data.item(), input.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -440,7 +445,7 @@ def validate(val_loader, model, criterion):
         del target
     torch.cuda.empty_cache()
 
-    return losses.avg, true, pred, std_errors.avg
+    return losses.avg, true, pred, std_errors.avg, MAPEs.avg
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -475,125 +480,65 @@ def MyLoss(pred, target):
 def StandardError(pred, target):
     return torch.sqrt(torch.sum(torch.pow(target-pred,2))/target.size()[0])
 
-def cal_r2(output, target):
+def MAPE(pred, target):
     '''
-    Calculate adjusted R squared
-
-    Parameters
-    ----------
-    output : TYPE
-        DESCRIPTION.
-    target : TYPE
-        DESCRIPTION.
-
-    Returns
-    -------
-    r2 : TYPE
-        DESCRIPTION.
+    Mean Absolute Percentaget Error
 
     '''
-    
-    output = output.cpu().numpy()
-    target = target.cpu()
-    '''
-    SS_Residual = sum((y-yhat)**2)       
-    SS_Total = sum((y-np.mean(y))**2)     
-    r_squared = 1 - (float(SS_Residual))/SS_Total
-    adjusted_r_squared = 1 - (1-r_squared)*(len(y)-1)/(len(y)-X.shape[1]-1)
-    '''
-    
-    r2 = r2_score(target, output)
-    
-    return r2
+    return torch.sum( torch.abs( torch.div(target-pred,target) ) ) / target.size()[0]
 
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting:
         for param in model.parameters():
             param.requires_grad = False
-
-def plot_error(train, test, dirName, fileName):
-    '''
-    Plot the error curve of training and testing data
-
-    Parameters
-    ----------
-    train : iterator
-        Training standard error
-    test : itertor
-        Testing standard error
-    dirName : str
-        Directory after results
-    fileName : string, optional
-        Name for file and title
-
-    Returns
-    -------
-    None.
-
-    '''
-    assert hasattr(train, '__iter__')
-    assert hasattr(test, '__iter__')
-    assert isinstance(dirName, str)
-    assert isinstance(fileName, str)
+            
+def read_model(modelName, model_param):
     
-    epoch = list(range(len(train)))
+    if args.input_type == 'image':
+        input_size = model_param[0]
+    else:
+        shape_train = model_param[0]
     
-    plt.plot(epoch, train, 'r-', epoch, test, 'b--')
-    plt.xlabel('Epoch')
-    plt.ylabel('Standard error')
-    plt.title('%s : (%.3f,%.3f)'%(fileName, min(train), min(test)))
-    plt.legend(('Train', 'Test'))
+    if modelName == 'mynet':
+        model = models.__dict__[modelName](shape_train[1])
+    elif modelName == 'vgg16':
+        model = tv_models.vgg16(pretrained=True)
+        set_parameter_requires_grad(model, True)
+        
+        model.classifier[0] = nn.Linear(model.classifier[0].in_features, model.classifier[0].out_features)
+        model.classifier[1] = nn.Sigmoid()
+        model.classifier[3] = nn.Linear(model.classifier[3].in_features, model.classifier[3].out_features)
+        model.classifier[4] = nn.Sigmoid()
+        
+        model.classifier[6] = nn.Linear(model.classifier[6].in_features,1)
+    elif modelName == 'resnet50':
+        model = tv_models.resnet50(pretrained=True)
+        set_parameter_requires_grad(model, True)
+        model.fc = nn.Linear(2048, 1)
+        
+    elif modelName == 'convnet':
+        model = models.__dict__[modelName](input_size)
+    elif modelName == 'convlstm':
+        model = models.__dict__[modelName](input_size, 64, 32, args.num_time)
+    elif modelName == 'convfc':
+        model = models.__dict__[modelName](input_size, 32, args.num_time)
+    elif modelName == 'eegnet':
+        model = models.__dict__[modelName](nn.ReLU(), (shape_train[2], shape_train[3]), shape_train[3], D=3)
+        
+    return model
     
-    plt.savefig('./results/%s/%s_error.png'%(dirName, fileName))
-    
-def plot_scatter(true, pred, dirName, fileName):
-    '''
-    Plot the scatter plots of true target and prediction
-
-    Parameters
-    ----------
-    true : iterator
-        Target
-    pred : iterator
-        Prediction
-    dirName : str
-        Directory after results
-    fileName : str
-        File name
-
-    Returns
-    -------
-    None.
-
-    '''
-    assert hasattr(true, '__iter__')
-    assert hasattr(pred, '__iter__')
-    assert isinstance(dirName, str)
-    assert isinstance(fileName, str)
-    
-    sort_indices = np.argsort(true)
-    fig, axs = plt.subplots(1,2, figsize=(8,4))
-    axs[0].plot(range(len(true)), true[sort_indices], 'r.', range(len(true)), pred[sort_indices], 'b.')
-    axs[0].set_xlabel('Record number')
-    axs[0].set_ylabel('Solution latency')
-    axs[0].legend(('True', 'Pred'))
-    
-    max_value = np.max(np.hstack((true, pred)))
-    axs[1].scatter(true, pred, marker='.')
-    axs[1].plot(range(int(max_value)), range(int(max_value)), 'r')
-    axs[1].set_xlabel('True')
-    axs[1].set_ylabel('Pred')
-    axs[1].set_xlim([0, max_value])
-    axs[1].set_ylim([0, max_value])
-    
-    plt.suptitle(fileName)
-    
-    plt.savefig('./results/%s/%s_scatter.png'%(dirName, fileName))
 
 if __name__ == '__main__':
     global device, args
     args = parser.parse_args()
     
+    # select gpus
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(device)
+    
     for i_exp in range(args.start_exp, args.num_fold):
+        # Cross validation
         print('--- Experiment %d ---'%(i_exp))
-        main(i_exp)
+        for i_split in range(args.start_split, args.num_split):
+            print('*** Split %d ***'%(i_split))
+            main(i_exp, i_split)

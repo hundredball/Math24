@@ -72,13 +72,63 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None, threshold=5.0):
         
     return ERSP_avg, SLs
 
-def center(train, test):
+def normalize(train, test):
     '''
-    Center training and testing data
+    Electrode-wise exponential moving standardization
 
     Parameters
     ----------
+    train : numpy 3d array (epoch, channel, features)
+        Training data
+    test : numpy 2d array (epoch, channel, features)
+        Testing data
+
+    Returns
+    -------
     train : numpy 2d array (epoch, features)
+        Training data after normalizing
+    test : numpy 2d array (epoch, features)
+        Testing data after normalizing
+
+    '''
+    assert isinstance(train, np.ndarray) and train.ndim==3
+    assert isinstance(test, np.ndarray) and test.ndim==3
+    assert train.shape[1] == test.shape[1] and train.shape[2] == test.shape[2]
+    
+    print('Moving standardize the data...')
+    
+    mean_train, var_train = np.zeros(train.shape), np.zeros(train.shape)
+    mean_test, var_test = np.zeros(test.shape), np.zeros(test.shape)
+    
+    # Take first mean and variance of first 256 points as initial mean and variance
+    base = 128
+    mean_train[:,:,:base] = np.mean(train[:,:,:base], axis=2)[:,:,np.newaxis]
+    var_train[:,:,:base] = np.var(train[:,:,:base], axis=2)[:,:,np.newaxis]
+    mean_test[:,:,:base] = np.mean(test[:,:,:base], axis=2)[:,:,np.newaxis]
+    var_test[:,:,:base] = np.var(test[:,:,:base], axis=2)[:,:,np.newaxis]
+    
+    train[:,:,:base] = (train[:,:,:base]-mean_train[:,:,:base])/(var_train[:,:,:base]**0.5)
+    test[:,:,:base] = (test[:,:,:base]-mean_test[:,:,:base])/(var_test[:,:,:base]**0.5)
+    for i_time in range(base, train.shape[2]):
+        
+        mean_train[:,:,i_time] = 0.001*train[:,:,i_time]+0.999*mean_train[:,:,i_time-1]
+        mean_test[:,:,i_time] = 0.001*test[:,:,i_time]+0.999*mean_test[:,:,i_time-1]
+        
+        var_train[:,:,i_time] = 0.001*(train[:,:,i_time]-mean_train[:,:,i_time])**2 + 0.999*var_train[:,:,i_time-1]
+        var_test[:,:,i_time] = 0.001*(test[:,:,i_time]-mean_test[:,:,i_time])**2 + 0.999*var_test[:,:,i_time-1]
+            
+        train[:,:,i_time] = (train[:,:,i_time]-mean_train[:,:,i_time])/(var_train[:,:,i_time]**0.5)
+        test[:,:,i_time] = (test[:,:,i_time]-mean_test[:,:,i_time])/(var_test[:,:,i_time]**0.5)
+    
+    return train, test
+
+def center(train, test):
+    '''
+    Center training and testing data for each features
+
+    Parameters
+    ----------
+    train : numpy 3d array (epoch, features)
         Training data
     test : numpy 2d array (epoch, features)
         Testing data
@@ -86,28 +136,72 @@ def center(train, test):
     Returns
     -------
     train : numpy 2d array (epoch, features)
-        Training data after standardizing
+        Training data after centering
     test : numpy 2d array (epoch, features)
-        Testing data after standardizing
+        Testing data after centering
 
     '''
-    assert isinstance(train, np.ndarray)
-    assert isinstance(test, np.ndarray)
     
-    '''
-    scaler = skpp.StandardScaler().fit(train)
+    assert isinstance(train, np.ndarray) and train.ndim==2
+    assert isinstance(test, np.ndarray) and test.ndim==2
     
-    test = scaler.transform(test)
-    train = scaler.transform(train)
-    '''
+    print('Center the data...')
     
     mean_train = np.mean(train, axis=0)
     
-    test = test - mean_train
-    train = train - mean_train
+    test = test - mean_train[np.newaxis,:]
+    train = train - mean_train[np.newaxis,:]
     
     return train, test
+
+def stratified_split(X, Y, n_split=3):
+    '''
+    Split data by ordered solution latency
+
+    Parameters
+    ----------
+    X : np.ndarray (epoch, ...)
+        Data
+    Y : np.ndarray (epoch)
+        Solution latency
+    n_split : int, optional
+        Number of split clusters. The default is 3.
+
+    Returns
+    -------
+    None.
+
+    '''
+    assert isinstance(X, np.ndarray)
+    assert isinstance(Y, np.ndarray) and Y.shape[0]==Y.size
+    assert isinstance(n_split, int) and n_split>0
     
+    print('Split trials according to solution latency')
+    
+    ori_Y_ndim = Y.ndim
+    if Y.ndim == 2:
+        Y = Y.flatten()
+    
+    # Arrange trials in ascending order
+    sorted_indices = np.argsort(Y)
+    X = X[sorted_indices, :]
+    Y = Y[sorted_indices]
+    
+    # Split them into list
+    num_trials_split = len(X)//n_split
+    X_list, Y_list = [], []
+    for i in range(n_split):
+        if i == n_split-1:
+            X_list.append(X[i*num_trials_split:, :])
+            Y_list.append(Y[i*num_trials_split:])
+        else:
+            X_list.append(X[i*num_trials_split:(i+1)*num_trials_split, :])
+            Y_list.append(Y[i*num_trials_split:(i+1)*num_trials_split])
+    
+    if ori_Y_ndim == 2:
+        Y_list = [Y.reshape((-1,1)) for Y in Y_list]
+    
+    return X_list, Y_list
 
 def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None):
     '''
@@ -196,6 +290,23 @@ def bandpower(ERSP, freqs, low, high):
     bandpower = np.sum(ERSP[:,:,index_freq], axis=2)
     
     return bandpower
+
+def trimData(ERSP_all, tmp_all):
+    
+    num_example = len(ERSP_all)
+    
+    SLs = tmp_all[:,2]
+    sorted_indices = np.argsort(SLs)
+    
+    ERSP_all = ERSP_all[sorted_indices, :]
+    tmp_all = tmp_all[sorted_indices, :]
+    
+    ERSP_all = ERSP_all[num_example//4: -num_example//4, :]
+    tmp_all = tmp_all[num_example//4: -num_example//4, :]
+    
+    print('Remain %d trials'%(len(ERSP_all)))
+    
+    return ERSP_all, tmp_all
 
 def trimMean(ERSP_all, SLs, freqs):
     '''
@@ -381,7 +492,7 @@ def remove_trials(ERSP_all, tmp_all, threshold):
         remove_indices = np.where(tmp_all>=threshold)[0]
     ERSP_rem = np.delete(ERSP_all, remove_indices, axis=0)
     tmp_rem = np.delete(tmp_all, remove_indices, axis=0)
-    print('> Remove %d trials'%(tmp_all.shape[0]-tmp_rem.shape[0]))
+    print('> Remove %d trials (%.3f sec)'%(tmp_all.shape[0]-tmp_rem.shape[0], threshold))
     
     return ERSP_rem, tmp_rem
 
@@ -393,3 +504,5 @@ if __name__ == '__main__':
     #select_ERSP, select_indices = select_correlated_ERSP(ERSP_all, SLs)
     
     #X_train = PCA_corr(select_ERSP, SLs, 5)
+    
+    X_list, Y_list = stratified_split(ERSP_all, SLs)

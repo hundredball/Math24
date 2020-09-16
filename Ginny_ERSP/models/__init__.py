@@ -10,3 +10,4 @@ Created on Fri Aug 21 17:25:41 2020
 from .RCNN import *
 from .mynet import *
 from .eegnet import *
+from .ensemble import *
