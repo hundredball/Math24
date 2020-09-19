@@ -40,10 +40,13 @@ parser.add_argument('-a', '--augmentation', default=None, type=str, help='Way of
 parser.add_argument('-b', '--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('-l', '--loss_type', default='L2', type=str, help='Loss type')
 parser.add_argument('-f', '--image_folder', default='images', type=str, help='Image folder (for image)')
+
 parser.add_argument('--num_fold', default=1, type=int, help='Number of fold for cross validation')
 parser.add_argument('--num_split', default=1, type=int, help='Number of split cluster for ensemble methods')
+parser.add_argument('--split_mode', default=1, type=int, help='Mode for spliting training data of ensemble methods (signal and power)')
 parser.add_argument('--normalize', dest='normalize', action='store_true', help='Normalize data before data augmentation')
 parser.add_argument('--scale', dest='scale', action='store_true', help='Scale image based on their original values')
+parser.add_argument('--center', dest='center_flag', action='store_true', help='Center data before feeding into the net')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate the trained model')
 
 parser.add_argument('--ensemble', default='', type=str, help='Path to models for ensemble learning')
@@ -51,7 +54,7 @@ parser.add_argument('--pre_model_name', default='convfc', type=str, help='Pre mo
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none), only for hold-out method')
 
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--start_exp', default=0, type=int, help='manual experiment number (useful on restarts)')
 parser.add_argument('--start_split', default=0, type=int, help='manual split cluster (useful on restarts)')
@@ -80,17 +83,28 @@ def main(index_exp, index_split):
         # Remove trials
         X, Y_reg = preprocessing.remove_trials(X, Y_reg, threshold=60)
         
-        # Split data
+        # Split data for cross validation
         if args.num_fold == 1:
             train_data, test_data, train_target, test_target = train_test_split(X, Y_reg, test_size=0.1, random_state=23)
             # Random state 15: training error becomes lower, testing error becomes higher
         else:
             kf = KFold(n_splits=args.num_fold, shuffle=True, random_state=23)
-            for i, (train_index, test_index) in kf.split(X):
+            for i, (train_index, test_index) in enumerate(kf.split(X)):
                 if i == index_exp:
                     train_data, train_target = X[train_index, :], Y_reg[train_index]
                     test_data, test_target = X[test_index, :], Y_reg[test_index]
                     
+        # Split data for ensemble methods
+        if not args.ensemble:
+            if args.num_split > 1:
+                data_list, target_list = preprocessing.stratified_split(train_data, train_target, n_split=args.num_split, mode=args.split_mode)
+                train_data, train_target = data_list[index_split], target_list[index_split]
+                '''
+                kf = KFold(n_splits=args.num_split, shuffle=True, random_state=32)
+                for i, (other_index, split_index) in enumerate(kf.split(train_data)):
+                    if i == index_split:
+                        train_data, train_target = train_data[split_index, :], train_target[split_index]
+                '''
         # Normalize the data
         if args.normalize:
             train_data, test_data = preprocessing.normalize(train_data, test_data)
@@ -137,24 +151,40 @@ def main(index_exp, index_split):
         # Remove trials
         ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, threshold=60)
         
-        # Set split indices
-        indices = {}
+        # Split data for cross validation
         if args.num_fold == 1:
-            indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=40)
+            train_data, test_data, train_target, test_target = train_test_split(ERSP_all, tmp_all[:,2], test_size=0.1, random_state=23)
         else:
             kf = KFold(n_splits=args.num_fold, shuffle=True, random_state=23)
-            for i, (train_index, test_index) in kf.split(X):
+            for i, (train_index, test_index) in enumerate(kf.split(ERSP_all)):
                 if i == index_exp:
-                    indices['train'] = train_index
-                    indices['test'] = test_index
-        
+                    train_data, train_target = ERSP_all[train_index, :], tmp_all[train_index, 2]
+                    test_data, test_target = ERSP_all[test_index, :], tmp_all[test_index, 2]
+                    
+        # Split data for ensemble methods
+        if not args.ensemble:
+            if args.num_split > 1:
+                data_list, target_list = preprocessing.stratified_split(train_data, train_target, n_split=args.num_split, mode=args.split_mode)
+                train_data, train_target = data_list[index_split], target_list[index_split]
+                '''
+                kf = KFold(n_splits=args.num_split, shuffle=True, random_state=32)
+                for i, (other_index, split_index) in enumerate(kf.split(np.arange(len(train_data)))):
+                    if i == index_split:
+                        train_data, train_target = train_data[split_index, :], train_target[split_index]
+                '''
+                    
+        # Concatenate train and test for standardizinsg
+        data = np.concatenate((train_data, test_data), axis=0)
+        target = np.concatenate((train_target, test_target))
+                    
         # Standardize data
-        ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, train_indices = indices['train'])
-        ERSP_all = ERSP_all.reshape((ERSP_all.shape[0], -1))
+        num_train = len(train_data)
+        data, target = preprocessing.standardize(data, target, train_indices = np.arange(num_train), threshold=5.0)
+        data = data.reshape((data.shape[0], -1))
         
         # Split data
-        train_data, test_data = tuple([ ERSP_all[indices[kind],:] for kind in ['train','test'] ])
-        train_target, test_target = tuple([ SLs[indices[kind]].reshape((-1,1)) for kind in ['train','test'] ])
+        train_data, test_data = data[:num_train, :], data[num_train:, :]
+        train_target, test_target = target[:num_train], target[num_train:]
         
         # Data augmentation
         if args.augmentation == 'SMOTER':
@@ -176,10 +206,15 @@ def main(index_exp, index_split):
         
     elif args.input_type == 'image':
         
-        assert (args.model_name in multiframe) == (args.num_time>1)
+        if args.ensemble:
+            input_model_name = args.pre_model_name
+        else:
+            input_model_name = args.model_name
+        
+        assert (input_model_name in multiframe) == (args.num_time>1)
         
         # Let input size be 224x224 if the model is vgg16
-        if args.model_name in ['vgg16', 'resnet50']:
+        if input_model_name in ['vgg16', 'resnet50']:
             input_size = 224
         else:
             input_size = 64
@@ -218,7 +253,7 @@ def main(index_exp, index_split):
         pre_models = []
         for i in range(args.num_split):
             pre_model = read_model(args.pre_model_name, model_param)
-            pre_model.load_state_dict( torch.load('%s/best_model%d.pt'%(args.ensemble, i)) )
+            pre_model.load_state_dict( torch.load('%s/last_model_exp%d_split%d.pt'%(args.ensemble, index_exp, i)) )
             set_parameter_requires_grad(pre_model, True)
             pre_models.append(pre_model)
             
@@ -306,9 +341,9 @@ def main(index_exp, index_split):
         
         # Save best model
         if is_best:
-            torch.save(model.state_dict(), './results/%s/best_model%d.pt'%(dirName, index_split))
+            torch.save(model.state_dict(), './results/%s/best_model_exp%d_split%d.pt'%(dirName, index_exp, index_split))
         if epoch == args.num_epoch-1:
-            torch.save(model.state_dict(), './results/%s/last_model%d.pt'%(dirName, index_split))
+            torch.save(model.state_dict(), './results/%s/last_model_exp%d_split%d.pt'%(dirName, index_exp, index_split))
     # Plot error curve
     plot_error(dict_error, dirName, fileName)
     
@@ -335,11 +370,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
     for i, sample in enumerate(train_loader):
         
-        if args.input_type in ['signal','power']:
+        if args.input_type in ['signal', 'power']:
             input, target = sample[0], sample[1]
-        elif args.input_type == 'image':
+        elif args.input_type in ['image']:
             input, target = sample['image'], sample['label']
-            target = target.view(-1,1)
+            #target = target.view(-1,1)
         
         # measure data loading time
         data_time.update(time.time() - end)
@@ -397,11 +432,11 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, sample in enumerate(val_loader):
         
-        if args.input_type in ['signal','power']:
+        if args.input_type in ['signal', 'power']:
             input, target = sample[0], sample[1]
-        elif args.input_type == 'image':
+        elif args.input_type in ['image']:
             input, target = sample['image'], sample['label']
-            target = target.view(-1,1)
+            #target = target.view(-1,1)
         
         input = input.to(device=device)
         target = target.to(device=device)
@@ -499,7 +534,7 @@ def read_model(modelName, model_param):
     else:
         shape_train = model_param[0]
     
-    if modelName == 'mynet':
+    if modelName in ['mynet', 'simplefc']:
         model = models.__dict__[modelName](shape_train[1])
     elif modelName == 'vgg16':
         model = tv_models.vgg16(pretrained=True)
@@ -539,6 +574,10 @@ if __name__ == '__main__':
     for i_exp in range(args.start_exp, args.num_fold):
         # Cross validation
         print('--- Experiment %d ---'%(i_exp))
-        for i_split in range(args.start_split, args.num_split):
-            print('*** Split %d ***'%(i_split))
-            main(i_exp, i_split)
+        if args.ensemble:
+            print('*** Ensemble ***')
+            main(i_exp, 100)
+        else:
+            for i_split in range(args.start_split, args.num_split):
+                print('*** Split %d ***'%(i_split))
+                main(i_exp, i_split)

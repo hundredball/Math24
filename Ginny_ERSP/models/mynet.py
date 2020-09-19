@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-__all__ = ['MyNet', 'mynet']
+__all__ = ['MyNet', 'mynet', 'simplefc']
 
 
 class MyNet(nn.Module):
@@ -33,6 +33,30 @@ class MyNet(nn.Module):
 
         return x
 
+class SimpleFC(nn.Module):
+    
+    def __init__(self, in_features):
+        super(SimpleFC, self).__init__()
+        
+        self.hidden = nn.Sequential(
+            nn.Linear(in_features, 25),
+            nn.ReLU()
+            )
+        self.fc = nn.Sequential(
+            nn.Linear(25, 1),
+            nn.ReLU()
+            )
+        
+    def forward(self, x):
+        
+        x = self.hidden(x)
+        x = self.fc(x)
+        x = x.flatten()
+        
+        return x
+    
+def simplefc(in_features):
+    return SimpleFC(in_features)
 
 def mynet(in_features):
     model = MyNet(in_features)

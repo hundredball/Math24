@@ -28,6 +28,7 @@ parser.add_argument('-t', '--num_time', default=1, type=int, help='Number of fra
 parser.add_argument('-r', '--remove_threshold', default=60.0, type=float, help='SL threshold for removing trials')
 parser.add_argument('-f', '--num_fold', default=1, type=int, help='Number of folds of cross validation')
 parser.add_argument('-s', '--num_split', default=1, type=int, help='If >1, for ensemble methods')
+parser.add_argument('--split_mode', default=3, type=int, help='Mode for spliting training data')
 
 
 def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, index_split=0):
@@ -407,12 +408,12 @@ def S2I_ensemble(ERSP_all, tmp_all, freqs, indices, num_time, n_split, index_exp
         os.makedirs('./images/exp%d/test'%(index_exp))
         
     # Standardize the data
-    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'], threshold=0.0)
+    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'], threshold=5.0)
     
     ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
     SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}
     
-    ERSP_list, SLs_list = preprocessing.stratified_split(ERSP_dict['train'], SLs_dict['train'], n_split=n_split)
+    ERSP_list, SLs_list = preprocessing.stratified_split(ERSP_dict['train'], SLs_dict['train'], n_split=n_split, mode=args.split_mode)
     
     start_time = time.time()
     print('[%.1f] Signal to image (Ensemble)'%(time.time()-start_time))

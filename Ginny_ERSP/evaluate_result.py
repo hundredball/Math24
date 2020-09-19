@@ -14,6 +14,7 @@ import numpy as np
 parser = argparse.ArgumentParser(description='Evaluate results')
 parser.add_argument('-n', '--folder_name', default=None, type=str, help='Name of folder in results')
 parser.add_argument('-e', '--num_exp', default=10, type=int, help='Number of experiments in the folder')
+parser.add_argument('--ensemble', dest='ensemble', action='store_true', help='Evaluate ensemble results')
 
 def plot_error(dict_error, dirName, fileName):
     '''
@@ -43,13 +44,16 @@ def plot_error(dict_error, dirName, fileName):
     axs[0].set_xlabel('Epoch')
     axs[0].set_ylabel('Standard error')
     axs[0].legend(('Train', 'Test'))
+    axs[0].set_title('Last std: (%.3f,%.3f)'%(dict_error['train_std'][-1], dict_error['test_std'][-1]))
     
     axs[1].plot(epoch, dict_error['train_MAPE'], 'r-', epoch, dict_error['test_MAPE'], 'b--')
     axs[1].set_xlabel('Epoch')
     axs[1].set_ylabel('MAPE')
     axs[1].legend(('Train', 'Test'))
+    axs[1].set_title('Last MAPE: (%.3f,%.3f)'%(dict_error['train_MAPE'][-1], dict_error['test_MAPE'][-1]))
     
     plt.suptitle(fileName)
+    plt.tight_layout(pad=2.0)
     plt.savefig('./results/%s/%s_error.png'%(dirName, fileName))
     plt.close()
     
@@ -106,8 +110,14 @@ if __name__ == '__main__':
     # Combine results from different experiments
     std_all = 0
     mape_all = 0
+    
+    if args.ensemble:
+        index_split = 100
+    else:
+        index_split = 0
+    
     for i in range(args.num_exp):
-        with open('./results/%s/%s_exp%d.data'%(args.folder_name, args.folder_name, i), 'rb') as fp:
+        with open('./results/%s/%s_split%d_exp%d.data'%(args.folder_name, args.folder_name, index_split, i), 'rb') as fp:
             dict_error = pickle.load(fp)
         target, pred = dict_error['target'], dict_error['pred'],
         std, mape = dict_error['test_std'][-1], dict_error['test_MAPE'][-1]

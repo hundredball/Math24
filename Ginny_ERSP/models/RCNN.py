@@ -126,6 +126,7 @@ class ConvFC(nn.Module):
         outputs = torch.stack(outputs)
         outputs = outputs.transpose(0,1).reshape(x.shape[0], -1)
         outputs = self.fc(outputs)
+        outputs = outputs.flatten()
         
         return outputs
     

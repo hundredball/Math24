@@ -31,7 +31,6 @@ class TopoplotLoader(data.Dataset):
         self.img_name, self.label = getData(root, mode, index_exp, index_split)
         self.mode = mode
         self.num_time = num_time
-        self.img_shape = np.zeros(3, dtype=int)
         self.transform = transform
         self.scale=scale
         self.index_exp = index_exp

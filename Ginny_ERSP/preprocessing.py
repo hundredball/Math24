@@ -9,6 +9,7 @@ Created on Sat Jul 11 10:28:06 2020
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn import preprocessing as skpp
+import random as rand
 import dataloader
 
 def standardize(ERSP, tmp, num_time=1, train_indices=None, threshold=5.0):
@@ -154,7 +155,7 @@ def center(train, test):
     
     return train, test
 
-def stratified_split(X, Y, n_split=3):
+def stratified_split(X, Y, n_split=3, mode=1):
     '''
     Split data by ordered solution latency
 
@@ -166,6 +167,11 @@ def stratified_split(X, Y, n_split=3):
         Solution latency
     n_split : int, optional
         Number of split clusters. The default is 3.
+    mode : int, optional
+        Split mode. The default is 1.
+        1 : Random
+        2 : Group split (0-25% | 25%-50%...)
+        3 : Strided split (1th, 5th, ... | 2th, 6th, ...)
 
     Returns
     -------
@@ -175,29 +181,54 @@ def stratified_split(X, Y, n_split=3):
     assert isinstance(X, np.ndarray)
     assert isinstance(Y, np.ndarray) and Y.shape[0]==Y.size
     assert isinstance(n_split, int) and n_split>0
-    
-    print('Split trials according to solution latency')
+    assert isinstance(mode, int)
     
     ori_Y_ndim = Y.ndim
     if Y.ndim == 2:
         Y = Y.flatten()
     
-    # Arrange trials in ascending order
-    sorted_indices = np.argsort(Y)
-    X = X[sorted_indices, :]
-    Y = Y[sorted_indices]
+    # Arrange trials in ascending order or random
+    if mode == 1:
+        print('Split trials randomly')
+        random_indices = np.arange(len(X))
+        rand.Random(4).shuffle(random_indices)
+        X = X[random_indices, :]
+        Y = Y[random_indices]
+    elif mode == 2:
+        print('Split trials by ordered groups')
+        sorted_indices = np.argsort(Y)
+        X = X[sorted_indices, :]
+        Y = Y[sorted_indices]
+    elif mode == 3:
+        print('Split trials with strides')
+        sorted_indices = np.argsort(Y)
+        X = X[sorted_indices, :]
+        Y = Y[sorted_indices]
+        
+        # Split them into list
+        i = 0
+        X_list, Y_list = [], []
+        indices_dict = {i : [] for i in range(n_split)}
+        while (i < len(Y)):
+            indices_dict[i%n_split].append(i)
+            i += 1
+        for i_list in range(n_split):
+            indices_dict[i_list] = np.array(indices_dict[i_list])
+            X_list.append(X[indices_dict[i_list], :])
+            Y_list.append(Y[indices_dict[i_list]])
     
-    # Split them into list
-    num_trials_split = len(X)//n_split
-    X_list, Y_list = [], []
-    for i in range(n_split):
-        if i == n_split-1:
-            X_list.append(X[i*num_trials_split:, :])
-            Y_list.append(Y[i*num_trials_split:])
-        else:
-            X_list.append(X[i*num_trials_split:(i+1)*num_trials_split, :])
-            Y_list.append(Y[i*num_trials_split:(i+1)*num_trials_split])
-    
+    if mode in [1,2]:
+        # Split them into list
+        num_trials_split = len(X)//n_split
+        X_list, Y_list = [], []
+        for i in range(n_split):
+            if i == n_split-1:
+                X_list.append(X[i*num_trials_split:, :])
+                Y_list.append(Y[i*num_trials_split:])
+            else:
+                X_list.append(X[i*num_trials_split:(i+1)*num_trials_split, :])
+                Y_list.append(Y[i*num_trials_split:(i+1)*num_trials_split])
+
     if ori_Y_ndim == 2:
         Y_list = [Y.reshape((-1,1)) for Y in Y_list]
     
@@ -505,4 +536,4 @@ if __name__ == '__main__':
     
     #X_train = PCA_corr(select_ERSP, SLs, 5)
     
-    X_list, Y_list = stratified_split(ERSP_all, SLs)
+    X_list, Y_list = stratified_split(ERSP_all, SLs, n_split=4, mode=3)
