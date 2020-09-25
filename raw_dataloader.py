@@ -28,7 +28,7 @@ def extract_data(data, events, i_file, diff_type, rm_baseline):
         index of the file in data_list.csv
     diff_type : str
         difficulty of interest (1,2,3)
-    rm_baseline : str
+    rm_baseline : bool
         Remove baseline before fixation
 
     Returns

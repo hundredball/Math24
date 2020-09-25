@@ -9,6 +9,7 @@ Created on Sat Jul 11 10:28:06 2020
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn import preprocessing as skpp
+from scipy.integrate import simps
 import random as rand
 import dataloader
 
@@ -287,7 +288,7 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
     
     select_ERSP = ERSP.reshape((ERSP.shape[0],-1))[:, select_indices==1]
     #print(select_ERSP.shape)
-    #print('Select %d features'%(np.sum(select_indices)))
+    print('Select %d features'%(np.sum(select_indices)))
     
     return select_ERSP, select_indices
 
@@ -301,24 +302,29 @@ def bandpower(ERSP, freqs, low, high):
         ERSP of all trials
     freqs : 1d numpy array
         frequency step of ERSP
-    low : int
+    low : list
         lower bound
-    high : int
+    high : list
         upper bound
 
     Returns
     -------
-    mean_ERSP : 2d numpy array (epoch, channel)
-        mean ERSP
+    bandpower : 3d numpy array (epoch, channel, band)
+        Bandpower of given bands
 
     '''
     assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 3
     assert isinstance(freqs, np.ndarray) and freqs.ndim == 1
-    assert isinstance(low, int) and isinstance(high, int)
-    assert high>=low
+    assert all([low[i]<high[i] for i in range(len(low))]) and len(low) == len(high)
     
-    index_freq = np.logical_and(freqs>low, freqs<high)
-    bandpower = np.sum(ERSP[:,:,index_freq], axis=2)
+    freq_res = freqs[1]-freqs[0]
+    for i in range(len(low)):
+        index_freq = np.logical_and(freqs>low[i], freqs<high[i])
+        bandpower_i = simps(ERSP[:,:,index_freq], dx=freq_res, axis=2).reshape((ERSP.shape[0],ERSP.shape[1],1))
+        if i == 0:
+            bandpower = bandpower_i
+        else:
+            bandpower = np.concatenate((bandpower, bandpower_i), axis=2)
     
     return bandpower
 

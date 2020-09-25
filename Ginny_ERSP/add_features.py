@@ -12,6 +12,7 @@ import dataloader
 import preprocessing
 
 from scipy.stats import multivariate_normal
+from itertools import combinations
 
 def parzen_window_est(X_train, X_test, h):
     '''
@@ -119,8 +120,35 @@ def get_conditional_entropy(X_train, X_test, Y_train, Y_test):
 
     return CE
 
+def get_correlations(ERSP):
+    '''
+    Get correlation between channels
+
+    Parameters
+    ----------
+    ERSP : np.ndarray (epoch, channel, features)
+        Event-related spectral potential
+
+    Returns
+    -------
+    correlation_all : np.ndarray (epoch, features)
+        Correlation between channels of all trials
+    '''
+    assert isinstance(ERSP, np.ndarray) and ERSP.ndim==3
+    
+    channel_comb = list(combinations(list(range(ERSP.shape[1])), 2))
+    correlation_all = np.zeros((ERSP.shape[0],len(channel_comb)))
+    for i_comb, (i,j) in enumerate(channel_comb):
+        for i_sample, sample in enumerate(ERSP):
+            correlation = np.corrcoef(sample[i,:], sample[j,:])[0,1]
+            correlation_all[i_sample, i_comb] = correlation
+            
+    return correlation_all
+    
+
 if __name__ == '__main__':
     
+    '''
     # Load data
     mu_vec = np.array([0,0])
     cov_mat = np.array([[1,0],[0,1]])
@@ -135,15 +163,22 @@ if __name__ == '__main__':
         
         print('[%f] Mean absolute error: %.3f'%(h, np.mean(np.abs(pdf_est-pdf_actual))))
     
-    '''
-    
     # Test get_conditional_entropy
     X, Y = samples[:,0].reshape((-1,1)), samples[:,1].reshape((-1,1))
     CE_X_Y = get_conditional_entropy(X, X, Y, Y)
     print(CE_X_Y)
     CE_Y_X = get_conditional_entropy(Y, Y, X, X)
     print(CE_Y_X)
-    '''
     
     print('Takes %.3f seconds'%(time.time()-start_time))
+    '''
+    
+    # Load preprocessed ERSP data
+    ERSP_all, tmp_all, freqs = dataloader.load_data()
+    
+    ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, 60)
+    ERSP_all, _ = preprocessing.standardize(ERSP_all, tmp_all)
+    
+    correlation_all = get_correlations(ERSP_all)
+    
     

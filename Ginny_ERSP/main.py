@@ -48,6 +48,8 @@ parser.add_argument('--normalize', dest='normalize', action='store_true', help='
 parser.add_argument('--scale', dest='scale', action='store_true', help='Scale image based on their original values')
 parser.add_argument('--center', dest='center_flag', action='store_true', help='Center data before feeding into the net')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate the trained model')
+parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate')
+parser.add_argument('--post_scale', dest='post_scale', action='store_true', help='Scale target between 0-1')
 
 parser.add_argument('--ensemble', default='', type=str, help='Path to models for ensemble learning')
 parser.add_argument('--pre_model_name', default='convfc', type=str, help='Pre models for ensemble learning')
@@ -124,7 +126,7 @@ def main(index_exp, index_split):
         elif args.augmentation == 'SMOTER':
             train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation)
             
-        if args.model_name == 'eegnet':
+        if args.model_name in ['eegnet', 'eegnet_trans_signal']:
             # (sample, channel, time) -> (sample, channel_NN, channel_EEG, time)
             [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_sample)) \
                                        for X in [train_data, test_data]]
@@ -147,6 +149,8 @@ def main(index_exp, index_split):
             with open('./ERSP_from_raw_rb.data', 'rb') as fp:
                 dict_ERSP = pickle.load(fp)
             ERSP_all, tmp_all = dict_ERSP['ERSP'], dict_ERSP['SLs']
+        num_channel = ERSP_all.shape[1]
+        num_freq = ERSP_all.shape[2]
             
         # Remove trials
         ERSP_all, tmp_all = preprocessing.remove_trials(ERSP_all, tmp_all, threshold=60)
@@ -179,8 +183,13 @@ def main(index_exp, index_split):
                     
         # Standardize data
         num_train = len(train_data)
-        data, target = preprocessing.standardize(data, target, train_indices = np.arange(num_train), threshold=5.0)
+        data, target = preprocessing.standardize(data, target, train_indices = np.arange(num_train), threshold=0.0)
         data = data.reshape((data.shape[0], -1))
+        
+        # Scale target between 0 and 1
+        if args.post_scale:
+            print('Scale the target between 0-1')
+            target = target/60
         
         # Split data
         train_data, test_data = data[:num_train, :], data[num_train:, :]
@@ -193,6 +202,11 @@ def main(index_exp, index_split):
         # center data
         if args.center_flag:
             train_data, test_data = preprocessing.center(train_data, test_data)
+            
+        if args.model_name == 'eegnet_trans_power':
+            # (sample, channel, freq) -> (sample, channel_NN, channel_EEG, freq)
+            [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_freq)) \
+                                       for X in [train_data, test_data]]
         
         (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
@@ -278,8 +292,8 @@ def main(index_exp, index_split):
         criterion = MyLoss
     print('Use %s loss'%(args.loss_type))
     
-    #optimizer = torch.optim.SGD(model.parameters(), 0.001,momentum=0.9)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr_rate,momentum=0.9)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_rate)
     
     # Record loss and accuracy of each epoch
     dict_error = {'train_std': list(range(args.num_epoch)), 'test_std': list(range(args.num_epoch)),
@@ -290,7 +304,7 @@ def main(index_exp, index_split):
         if args.resume:
             if os.path.isfile(args.resume):
                 model.load_state_dict(torch.load(args.resume))
-                
+        
         _, target, pred, _, _ = validate(test_loader, model, criterion)
         plot_scatter(target, pred, dirName, fileName)
         return 0
@@ -395,9 +409,12 @@ def train(train_loader, model, criterion, optimizer, epoch):
         optimizer.step()
         
         # Record error
+        if args.post_scale:
+            output, target_var = output*60, target_var*60
+            
         std_error = StandardError(output, target_var)
-        std_errors.update(std_error.data.item(), input.size(0))
         mape = MAPE(output, target_var)
+        std_errors.update(std_error.data.item(), input.size(0))
         MAPEs.update(mape.data.item(), input.size(0))
 
         # measure elapsed time
@@ -412,7 +429,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
                    epoch, args.num_epoch, i, len(train_loader), curr_lr,
-                   batch_time=batch_time, data_time=data_time, loss=losses))
+                   batch_time=batch_time, data_time=data_time, loss=std_errors))
             
         del input
         del target
@@ -449,9 +466,11 @@ def validate(val_loader, model, criterion):
         loss = criterion(output, target_var)
         
         # measure accuracy and record loss
-        std_error = StandardError(output, target_var)
-        mape = MAPE(output, target_var)
-        
+        if args.post_scale:
+            output, target = output*60, target*60
+            
+        std_error = StandardError(output, target)
+        mape = MAPE(output, target)
         losses.update(loss.data.item(), input.size(0))
         std_errors.update(std_error.data.item(), input.size(0))
         MAPEs.update(mape.data.item(), input.size(0))
@@ -464,7 +483,7 @@ def validate(val_loader, model, criterion):
             print('Test: [{0}/{1}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
-                   i, len(val_loader), batch_time=batch_time, loss=losses))
+                   i, len(val_loader), batch_time=batch_time, loss=std_errors))
             
         # Record target and prediction
         target = target.flatten()
@@ -534,9 +553,8 @@ def read_model(modelName, model_param):
     else:
         shape_train = model_param[0]
     
-    if modelName in ['mynet', 'simplefc']:
-        model = models.__dict__[modelName](shape_train[1])
-    elif modelName == 'vgg16':
+    
+    if modelName == 'vgg16':
         model = tv_models.vgg16(pretrained=True)
         set_parameter_requires_grad(model, True)
         
@@ -559,6 +577,11 @@ def read_model(modelName, model_param):
         model = models.__dict__[modelName](input_size, 32, args.num_time)
     elif modelName == 'eegnet':
         model = models.__dict__[modelName](nn.ReLU(), (shape_train[2], shape_train[3]), shape_train[3], D=3)
+    elif modelName in ['eegnet_trans_power', 'eegnet_trans_signal']:
+        model = models.__dict__[modelName](shape_train[2], shape_train[3])
+    else:
+        model = models.__dict__[modelName](shape_train[1])
+        
         
     return model
     
