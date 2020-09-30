@@ -134,11 +134,16 @@ def STFT(data, SLs, channels, low, high, savePath=None):
 
 if __name__ == '__main__':
     
+    # Save data for all subject
+    X, _, Y_reg, channels = dl.read_data([1,2,3], list(range(11)), 'class', rm_baseline=True)
+    freq, t, Zxx = STFT(X, Y_reg, channels, 2, 30, savePath='./Ginny_ERSP/raw_data/ERSP_from_raw_100.data')
+    
+    '''
     # Save data for each subject
     for i_sub in range(11):
-        X, Y_class, Y_reg, channels = dl.read_data([1,2,3], [i_sub], 'class')
+        X, Y_class, Y_reg, channels = dl.read_data([1,2,3], [i_sub], 'class', rm_baseline=True)
     
         # Adopt STFT and save file
         freq, t, Zxx  = STFT(X, Y_reg, channels, 2, 30, savePath='./Ginny_ERSP/raw_data/ERSP_from_raw_%s.data'%(str(i_sub)))
-    
+    '''
     

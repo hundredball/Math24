@@ -8,11 +8,19 @@ Created on Tue Sep  8 20:57:14 2020
 
 import numpy as np
 import time
+import pickle
 import dataloader
 import preprocessing
 
+from pyinform.conditionalentropy import conditional_entropy
 from scipy.stats import multivariate_normal
-from itertools import combinations
+from itertools import combinations, permutations
+
+import os,sys,inspect
+current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir) 
+import raw_dataloader
 
 def parzen_window_est(X_train, X_test, h):
     '''
@@ -120,6 +128,46 @@ def get_conditional_entropy(X_train, X_test, Y_train, Y_test):
 
     return CE
 
+
+def calculate_CE(signal, savePath):
+    '''
+    Calculate conditional entropy between each channels
+
+    Parameters
+    ----------
+    signal : np.ndarray (epoch, channel, time)
+        Signal data
+    savePath : str
+        Path for saving the data
+
+    Returns
+    -------
+    CE : np.ndarray (epoch, features)
+        Conditional entropy between each channels
+
+    '''
+    assert isinstance(signal, np.ndarray) and signal.ndim==3
+    assert isinstance(savePath, str)
+    
+    num_channels = signal.shape[1]
+    channel_perm = list(permutations(range(num_channels), 2))
+    CE_all = np.zeros((signal.shape[0], len(channel_perm)))
+    
+    for i_perm, (i,j) in enumerate(channel_perm):
+        for i_sample, sample in enumerate(signal):
+            # Begin from 0 and round to integer
+            signal1 = np.round(signal[i_sample, i, :] - np.min(signal[i_sample, i, :]))
+            signal2 = np.round(signal[i_sample, j, :] - np.min(signal[i_sample, j, :]))
+            
+            CE = conditional_entropy(signal1, signal2)
+            CE_all[i_sample, i_perm] = CE
+            
+    with open(savePath, 'wb') as fp:
+        pickle.dump(CE_all, fp)
+    
+    return CE_all
+    
+
 def get_correlations(ERSP):
     '''
     Get correlation between channels
@@ -172,7 +220,7 @@ if __name__ == '__main__':
     
     print('Takes %.3f seconds'%(time.time()-start_time))
     '''
-    
+    '''
     # Load preprocessed ERSP data
     ERSP_all, tmp_all, freqs = dataloader.load_data()
     
@@ -180,5 +228,14 @@ if __name__ == '__main__':
     ERSP_all, _ = preprocessing.standardize(ERSP_all, tmp_all)
     
     correlation_all = get_correlations(ERSP_all)
+    '''
     
+    # Load raw data
+    for i in range(11):
+        X, _, Y_reg, channels = raw_dataloader.read_data([1,2,3], date=[i], pred_type='class', rm_baseline=True)
+        X, Y_reg = preprocessing.remove_trials(X, Y_reg, 60)
+        _ = calculate_CE(X, './raw_data/CE_sub%d'%(i))
     
+    X, _, Y_reg, channels = raw_dataloader.read_data([1,2,3], date=range(11), pred_type='class', rm_baseline=True)
+    X, Y_reg = preprocessing.remove_trials(X, Y_reg, 60)
+    _ = calculate_CE(X, './raw_data/CE_sub100')

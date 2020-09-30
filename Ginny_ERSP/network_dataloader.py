@@ -44,7 +44,6 @@ class TopoplotLoader(data.Dataset):
             print('Load scaler...')
             with open('%s/scaler.data'%(self.root), 'rb') as fp:
                 self.dict_scaler = pickle.load(fp)
-        
         print("> Found %d images, %d examples" % (len(self.img_name)*self.num_time, len(self.img_name)))
 
     def __len__(self):

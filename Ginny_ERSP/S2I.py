@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.tri as tri
 import matplotlib.pyplot as plt
+import scipy.misc
 from scipy.interpolate import griddata
 from sklearn.model_selection import train_test_split, KFold
 import time
@@ -20,6 +21,7 @@ import os
 import dataloader
 import preprocessing
 import data_augmentation
+from PIL import Image
 
 parser = argparse.ArgumentParser(description='Signal to image')
 parser.add_argument('-m', '--mode', default='normal', type=str, help='Generating method')
@@ -30,6 +32,24 @@ parser.add_argument('-f', '--num_fold', default=1, type=int, help='Number of fol
 parser.add_argument('-s', '--num_split', default=1, type=int, help='If >1, for ensemble methods')
 parser.add_argument('--split_mode', default=3, type=int, help='Mode for spliting training data')
 
+def fig2data ( fig ):
+    # draw the renderer
+    fig.canvas.draw()
+ 
+    # Get the RGBA buffer from the figure
+    w,h = fig.canvas.get_width_height()
+    buf = np.fromstring(fig.canvas.tostring_argb(), dtype=np.uint8)
+    buf = buf.reshape((w,h,4))
+ 
+    # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
+    buf = np.roll ( buf, 3, axis = 2 )
+    return buf
+
+def fig2img ( fig ):
+    # put the figure pixmap into a numpy array
+    buf = fig2data(fig)
+    w, h, d = buf.shape
+    return Image.frombytes( "RGBA", ( w ,h ), buf.tostring( ) )
 
 def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, index_split=0):
     '''
@@ -84,10 +104,8 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
         print('[%f] Time step: %d ...'%(time.time()-start_time, i_time))
         
         ERSP = ERSP_all[:,:,:,i_time]
-        theta = preprocessing.bandpower(ERSP, freqs, 4, 8)
-        alpha = preprocessing.bandpower(ERSP, freqs, 8, 14)
-        beta = preprocessing.bandpower(ERSP, freqs, 14, 30)
-        bandpower = np.concatenate((theta[:,:,np.newaxis], alpha[:,:,np.newaxis], beta[:,:,np.newaxis]), axis=2)
+        lower, higher = [4,8,14], [8,14,30]
+        bandpower = preprocessing.bandpower(ERSP, freqs, lower, higher)
 
         # Read channel information
         channel_info = pd.read_csv('Channel_location.csv')
@@ -102,19 +120,38 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
 
         # Turn interactive plotting off
         plt.ioff()
+        '''
+        # Set fig and ax for three figures
+        fig = {}
+        ax = {}
+
+        for i_band, band in enumerate(band_name):
+            fig[band] = plt.figure()
+            ax[band] = fig[band].add_subplot(111, aspect = 1)
+            
+            # Remove ticks
+            ax[band].set_xticks([])
+            ax[band].set_yticks([])
+            
+            ax[band].set_xlim(-1, 1)
+            ax[band].set_ylim(-1, 1)
+        '''
 
         # Topoplot
-
         for i_data in range(num_example):
             min_ = {}
             scale = {}
+            im = {}
 
             # Plot topo for each band
             for i_band in range(3):
                 fig, ax = plt.subplots(figsize=(4,4))
+                ax.axis('off')
+                #fig = plt.figure()
+                #ax = fig.add_subplot(111, aspect=1)
                 n_angles = 48
-                n_radii = 100
-                radius = 0.9
+                n_radii = 200
+                radius = 1.0
                 radii = np.linspace(0, radius, n_radii)
                 angles = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
 
@@ -130,13 +167,15 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
                 channel_values = bandpower[i_data,:,i_band]-min_[i_band]
                 scale[i_band] = np.max(channel_values)
                 channel_values = channel_values/scale[i_band]
-
+                
+                
                 # Add couple of min values to outline for interpolation
                 add_x = np.reshape(radius*np.cos(angles), (len(angles), 1))
                 add_y = np.reshape(radius*np.sin(angles), (len(angles), 1))
                 add_element = np.concatenate((add_x, add_y), axis=1)
                 plot_loc = np.concatenate((plot_loc, add_element), axis=0)
                 channel_values = np.concatenate((channel_values, np.zeros(len(angles))))
+                
 
                 # Interpolate 
                 angles = np.repeat(angles[..., np.newaxis], n_radii, axis=1) 
@@ -147,8 +186,9 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
                 triang = tri.Triangulation(x, y)
                 ax.set_xlim((-1, 1))
                 ax.set_ylim((-1, 1))
-                tcf = ax.tricontourf(triang, z, cmap = cmap_name[i_band], levels=50)   # Reds, Greens, Blues
+                tcf = ax.tricontourf(triang, z, cmap = cmap_name[i_band], levels=60)   # Reds, Greens, Blues
                 #fig.colorbar(tcf)
+                im[band_name[i_band]] = fig2img(fig)
                 
                 '''
                 # Add nose
@@ -164,32 +204,31 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
                 ax.plot([0.91,0.96], [0.05, 0.1], color='black')
                 ax.plot([0.96,0.96], [0.1, -0.1], color='black')
                 ax.plot([0.96,0.91], [-0.1, -0.05], color='black')
-                '''
 
-                ax.axis('off')
                 plt.savefig('./images/%s.png'%(band_name[i_band]))
+                '''
                 plt.close()
-
-            # Combine three plots
-            figure_r = plt.imread('./images/%s.png'%(band_name[0]))
-            figure_g = plt.imread('./images/%s.png'%(band_name[1]))
-            figure_b = plt.imread('./images/%s.png'%(band_name[2]))
+                
             
-            figure_r, figure_g, figure_b = figure_r[:,:,:3], figure_g[:,:,:3], figure_b[:,:,:3]
-            
-            # Scale back 
-            figure_r = figure_r*scale[0]+min_[0]
-            figure_g = figure_g*scale[1]+min_[1]
-            figure_b = figure_b*scale[2]+min_[2]
-            
-            figure_mix = (figure_r+figure_g+figure_b)/3
-            
-            # Scale each channels from 0~1
+            for i_band, band in enumerate(band_name):
+                im[band] = np.array(im[band])
+                # Scale back rgb
+                #im[band] = im[band]*scale[i_band]+min_[i_band]
+                
+            figure_mix = im['theta'] + im['alpha'] + im['beta']
+            figure_mix = figure_mix[:,:,:3]
+            '''
+            # Scale each channels from 0~255
             for i_channel in range(3):
                 min_[i_channel] = np.min(figure_mix[:,:,i_channel])
                 figure_mix[:,:,i_channel] -= min_[i_channel]
                 scale[i_channel] = np.max(figure_mix[:,:,i_channel])
-                figure_mix[:,:,i_channel] /= scale[i_channel]
+                figure_mix[:,:,i_channel] = figure_mix[:,:,i_channel]/scale[i_channel]*255
+            '''
+                
+            #figure_mix[:,:,3] = 255
+            # Change to uint8
+            figure_mix = np.asarray(figure_mix, dtype=np.uint8)
             
             if index_split == -1:
                 dirName = 'test'
@@ -198,8 +237,8 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
             
             fileName = '%d_mix_%d'%(i_data, i_time)
             plt.imsave('./images/exp%d/%s/%s.png'%(index_exp, dirName, fileName), figure_mix)
-            # dict_img[fileName] = np.floor(figure_mix*255)
-            dict_scaler[fileName] = {'min_':min_, 'scale':scale}
+            #scipy.misc.imsave('./images/exp%d/%s/%s.png'%(index_exp, dirName, fileName), figure_mix)
+            #dict_scaler[fileName] = {'min_':min_, 'scale':scale}
 
             # Only save fileNames for the first time step
             if i_time == 0:
@@ -207,9 +246,10 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
         
     print('[%f] Finished all topoplots!'%(time.time()-start_time))
     
+    '''
     with open('./images/exp%d/scaler%d.data'%(index_exp, index_split), 'wb') as fp:
         pickle.dump(dict_scaler, fp)
-    
+    '''
         
     return fileNames
     
@@ -342,7 +382,7 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time, index_exp=0):
         os.makedirs('./images/exp%d/test'%(index_exp))
     
     # Standardize the data
-    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'])
+    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'], threshold=0.0)
     ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
     SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}
     
@@ -408,7 +448,7 @@ def S2I_ensemble(ERSP_all, tmp_all, freqs, indices, num_time, n_split, index_exp
         os.makedirs('./images/exp%d/test'%(index_exp))
         
     # Standardize the data
-    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'], threshold=5.0)
+    ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'], threshold=0.0)
     
     ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
     SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}

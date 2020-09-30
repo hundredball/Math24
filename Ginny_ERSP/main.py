@@ -5,6 +5,7 @@ import faulthandler
 import numpy as np
 import pickle
 from sklearn.model_selection import train_test_split, KFold
+from sklearn.decomposition import PCA
 
 import torch
 import torch.nn as nn
@@ -44,12 +45,15 @@ parser.add_argument('-f', '--image_folder', default='images', type=str, help='Im
 parser.add_argument('--num_fold', default=1, type=int, help='Number of fold for cross validation')
 parser.add_argument('--num_split', default=1, type=int, help='Number of split cluster for ensemble methods')
 parser.add_argument('--split_mode', default=1, type=int, help='Mode for spliting training data of ensemble methods (signal and power)')
-parser.add_argument('--normalize', dest='normalize', action='store_true', help='Normalize data before data augmentation')
-parser.add_argument('--scale', dest='scale', action='store_true', help='Scale image based on their original values')
+parser.add_argument('--normalize', dest='normalize', action='store_true', help='Electrode-wise exponential moving standardization for signal')
+parser.add_argument('--scale_image', dest='scale_image', action='store_true', help='Scale image based on their original values')
+parser.add_argument('--scale_data', dest='scale_data', action='store_true', help='Standardize data before feeding into net')
 parser.add_argument('--center', dest='center_flag', action='store_true', help='Center data before feeding into the net')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate the trained model')
 parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate')
 parser.add_argument('--post_scale', dest='post_scale', action='store_true', help='Scale target between 0-1')
+parser.add_argument('--index_sub', default=None, type=int, help='Subject number')
+parser.add_argument('--add_CE', dest='add_CE', action='store_true', help='Add conditional entropy of signal between channels')
 
 parser.add_argument('--ensemble', default='', type=str, help='Path to models for ensemble learning')
 parser.add_argument('--pre_model_name', default='convfc', type=str, help='Pre models for ensemble learning')
@@ -80,7 +84,7 @@ def main(index_exp, index_split):
     if args.input_type == 'signal':
         X, _, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline=True)
         num_channel = X.shape[1]
-        num_sample = X.shape[2]     # Number of time sample
+        num_feature = X.shape[2]     # Number of time sample
         
         # Remove trials
         X, Y_reg = preprocessing.remove_trials(X, Y_reg, threshold=60)
@@ -110,6 +114,7 @@ def main(index_exp, index_split):
         # Normalize the data
         if args.normalize:
             train_data, test_data = preprocessing.normalize(train_data, test_data)
+        
                     
         # Data augmentation
         if args.augmentation == 'overlapping':
@@ -126,9 +131,16 @@ def main(index_exp, index_split):
         elif args.augmentation == 'SMOTER':
             train_data, train_target = data_augmentation.aug(train_data, train_target, args.augmentation)
             
+        # scale data
+        if args.scale_data:
+            train_data, test_data = train_data.reshape((train_data.shape[0],-1)), test_data.reshape((test_data.shape[0],-1))
+            train_data, test_data = preprocessing.scale(train_data, test_data)
+            train_data = train_data.reshape((train_data.shape[0],num_channel, -1))
+            test_data = test_data.reshape((test_data.shape[0],num_channel, -1))
+            
         if args.model_name in ['eegnet', 'eegnet_trans_signal']:
             # (sample, channel, time) -> (sample, channel_NN, channel_EEG, time)
-            [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_sample)) \
+            [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_feature)) \
                                        for X in [train_data, test_data]]
         
         
@@ -146,7 +158,8 @@ def main(index_exp, index_split):
         if args.data_cate == 1:
             ERSP_all, tmp_all, freqs = dataloader.load_data()
         elif args.data_cate == 2:
-            with open('./ERSP_from_raw_rb.data', 'rb') as fp:
+            data_file = './raw_data/ERSP_from_raw_%d.data'%(args.index_sub)
+            with open(data_file, 'rb') as fp:
                 dict_ERSP = pickle.load(fp)
             ERSP_all, tmp_all = dict_ERSP['ERSP'], dict_ERSP['SLs']
         num_channel = ERSP_all.shape[1]
@@ -162,8 +175,22 @@ def main(index_exp, index_split):
             kf = KFold(n_splits=args.num_fold, shuffle=True, random_state=23)
             for i, (train_index, test_index) in enumerate(kf.split(ERSP_all)):
                 if i == index_exp:
-                    train_data, train_target = ERSP_all[train_index, :], tmp_all[train_index, 2]
-                    test_data, test_target = ERSP_all[test_index, :], tmp_all[test_index, 2]
+                    train_data, test_data = ERSP_all[train_index, :], ERSP_all[test_index, :]
+                    if args.data_cate == 2:
+                        train_target, test_target = tmp_all[train_index], tmp_all[test_index]
+                    else:
+                        train_target, test_target = tmp_all[train_index, 2], tmp_all[test_index, 2]
+                        
+                    if args.add_CE:
+                        assert args.data_cate == 2
+                        with open('./raw_data/CE_sub%d'%(args.index_sub), 'rb') as fp:
+                            CE = pickle.load(fp)
+                        CE_train, CE_test = CE[train_index,:], CE[test_index,:]
+                        # PCA for CE
+                        pca = PCA(n_components=10)
+                        pca.fit(CE_train)
+                        CE_train, CE_test = pca.transform(CE_train), pca.transform(CE_test)
+                        
                     
         # Split data for ensemble methods
         if not args.ensemble:
@@ -202,6 +229,15 @@ def main(index_exp, index_split):
         # center data
         if args.center_flag:
             train_data, test_data = preprocessing.center(train_data, test_data)
+            
+        # scale data
+        if args.scale_data:
+            train_data, test_data = preprocessing.scale(train_data, test_data)
+            
+        # Add conditional entropy
+        if args.add_CE:
+            train_data = np.concatenate((train_data, CE_train), axis=1)
+            test_data = np.concatenate((test_data, CE_train), axis=1)
             
         if args.model_name == 'eegnet_trans_power':
             # (sample, channel, freq) -> (sample, channel_NN, channel_EEG, freq)
@@ -247,7 +283,7 @@ def main(index_exp, index_split):
 
         # Create training and testing datasets
         image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x],
-                        scale=args.scale, index_exp=index_exp, index_split=index_split) for x in ['train', 'test']}
+                        scale=args.scale_image, index_exp=index_exp, index_split=index_split) for x in ['train', 'test']}
 
         # Create training and testing dataloaders
         train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, num_workers=4)

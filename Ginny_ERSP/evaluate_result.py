@@ -9,6 +9,7 @@ Created on Fri Sep 11 11:11:22 2020
 import argparse
 import pickle
 import matplotlib.pyplot as plt
+from sklearn.metrics import mean_squared_error
 import numpy as np
 
 parser = argparse.ArgumentParser(description='Evaluate results')
@@ -88,6 +89,7 @@ def plot_scatter(true, pred, dirName, fileName):
     axs[0].set_xlabel('Record number')
     axs[0].set_ylabel('Solution latency')
     axs[0].legend(('True', 'Pred'))
+    axs[0].set_title('std error = %.3f'%(mean_squared_error(true, pred)**0.5))
     
     max_value = np.max(np.hstack((true, pred)))
     axs[1].scatter(true, pred, marker='.')

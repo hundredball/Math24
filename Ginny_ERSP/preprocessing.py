@@ -8,7 +8,7 @@ Created on Sat Jul 11 10:28:06 2020
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn import preprocessing as skpp
+from sklearn.preprocessing import StandardScaler
 from scipy.integrate import simps
 import random as rand
 import dataloader
@@ -153,6 +153,36 @@ def center(train, test):
     
     test = test - mean_train[np.newaxis,:]
     train = train - mean_train[np.newaxis,:]
+    
+    return train, test
+
+def scale(train, test):
+    '''
+    Standardize training and testing data according to training data
+
+    Parameters
+    ----------
+    train : np.ndarray (epoch, features)
+        Training data
+    test : np.ndarray (epoch, features)
+        Testing data
+
+    Returns
+    -------
+    train : np.ndarray (epoch, features)
+        Transformed training data
+    test : np.ndarray (epoch, features)
+        Transformed testing data
+
+    '''
+    assert isinstance(train, np.ndarray) and train.ndim==2
+    assert isinstance(test, np.ndarray) and test.ndim==2
+    
+    print('Standardize the data...')
+    scaler = StandardScaler()
+    scaler.fit(train)
+    train = scaler.transform(train)
+    test = scaler.transform(test)
     
     return train, test
 
@@ -537,9 +567,25 @@ if __name__ == '__main__':
     
     ERSP_all, tmp_all, freqs = dataloader.load_data()
     ERSP_all, SLs = standardize(ERSP_all, tmp_all)
+    bandpower_all = bandpower(ERSP_all, freqs, [4], [30])
     
-    #select_ERSP, select_indices = select_correlated_ERSP(ERSP_all, SLs)
+    train, test = bandpower_all[:300,:], bandpower_all[300:,:]
+    train, test = train.reshape((train.shape[0],-1)), test.reshape((test.shape[0], -1))
     
-    #X_train = PCA_corr(select_ERSP, SLs, 5)
+    print('---Before standardizing---')
+    print('Mean of train: ', np.mean(train, axis=0))
+    print('Mean of test: ', np.mean(test, axis=0))
+    print('Std of train: ', np.std(train, axis=0))
+    print('Std of test: ', np.std(test, axis=0))
     
-    X_list, Y_list = stratified_split(ERSP_all, SLs, n_split=4, mode=3)
+    train, test = scale(train, test)
+    
+    print('---After standardizing---')
+    print('Mean of train: ', np.mean(train, axis=0))
+    print('Mean of test: ', np.mean(test, axis=0))
+    print('Std of train: ', np.std(train, axis=0))
+    print('Std of test: ', np.std(test, axis=0))
+    
+    
+    
+    

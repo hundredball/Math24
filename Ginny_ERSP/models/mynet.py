@@ -11,13 +11,13 @@ class MyNet(nn.Module):
         
         self.conv = nn.Conv1d(in_channels=in_features, out_channels=in_features, kernel_size=1, groups=in_features)
         self.batchnorm = nn.BatchNorm1d(in_features)
-        self.sigmoid = nn.Sigmoid()
+        self.relu = nn.ReLU()
         self.fc = nn.Sequential(
-            nn.Linear(in_features, 100),
+            nn.Linear(in_features, 50),
             nn.ReLU(),
-            nn.Linear(100, 50),
+            nn.Linear(50, 25),
             nn.ReLU(),
-            nn.Linear(50, 1)
+            nn.Linear(25, 1),
             )
 
     def forward(self, x):
@@ -26,11 +26,12 @@ class MyNet(nn.Module):
         x = x.reshape((x.shape[0], -1, 1))
         x = self.conv(x)
         x = self.batchnorm(x)
-        x = self.sigmoid(x)
+        x = self.relu(x)
         
         # Linear
         x = x.reshape((x.shape[0],-1))
         x = self.fc(x)
+        x = x.flatten()
 
         return x
 
@@ -43,7 +44,6 @@ class SimpleFC(nn.Module):
             nn.Linear(in_features, 25),
             nn.ReLU(),
             nn.Linear(25, 1),
-            nn.Sigmoid()
             )
         '''
         # Set all the weights absolute
