@@ -17,9 +17,6 @@ from scipy.stats import multivariate_normal
 from itertools import combinations, permutations
 
 import os,sys,inspect
-current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-parent_dir = os.path.dirname(current_dir)
-sys.path.insert(0, parent_dir) 
 import raw_dataloader
 
 def parzen_window_est(X_train, X_test, h):

@@ -9,8 +9,7 @@ import numpy as np
 import scipy.io as sio
 import pandas as pd
 import os,inspect
-current_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-root_path = os.path.dirname(current_dir)
+root_path = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 
 def load_data():
     '''

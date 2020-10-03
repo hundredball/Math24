@@ -1,36 +1,50 @@
 import pandas as pd
-from torch.utils import data
 import numpy as np
 from skimage import io, transform
+from torch.utils import data
 import torch
+import pickle
 
-def getData(mode):
+def getData(root, mode, index_exp, index_split):
     if mode == 'train':
-        img = pd.read_csv('./images/train_img.csv')
-        label = pd.read_csv('./images/train_label.csv')
+        img = pd.read_csv('./%s/exp%d/train%d_img.csv'%(root, index_exp, index_split))
+        label = pd.read_csv('./%s/exp%d/train%d_label.csv'%(root, index_exp, index_split))
         return img['fileName'].values, label['solution_time'].values
     else:
-        img = pd.read_csv('./images/test_img.csv')
-        label = pd.read_csv('./images/test_label.csv')
+        img = pd.read_csv('./%s/exp%d/test_img.csv'%(root, index_exp))
+        label = pd.read_csv('./%s/exp%d/test_label.csv'%(root, index_exp))
         return img['fileName'].values, label['solution_time'].values
 
 
 class TopoplotLoader(data.Dataset):
-    def __init__(self, root, mode, transform=None):
+    def __init__(self, root, mode, num_time=1, transform=None, scale=False, index_exp=0, index_split=0):
         """
         Args:
             root (string): Root path of the dataset.
             mode : Indicate procedure status(training or testing)
+            num_time : Number of time steps
 
             self.img_name (string list): String list that store all image names.
             self.label (int or float list): Numerical list that store all ground truth label values.
         """
         self.root = root
-        self.img_name, self.label = getData(mode)
+        self.img_name, self.label = getData(root, mode, index_exp, index_split)
         self.mode = mode
-        self.img_shape = np.zeros(3, dtype=int)
+        self.num_time = num_time
         self.transform = transform
-        print("> Found %d images..." % (len(self.img_name)))
+        self.scale=scale
+        self.index_exp = index_exp
+        self.index_split = index_split
+        '''
+        with open('./images/img.data', 'rb') as fp:
+            self.dict_img = pickle.load(fp)
+        '''
+        
+        if self.scale:
+            print('Load scaler...')
+            with open('%s/scaler.data'%(self.root), 'rb') as fp:
+                self.dict_scaler = pickle.load(fp)
+        print("> Found %d images, %d examples" % (len(self.img_name)*self.num_time, len(self.img_name)))
 
     def __len__(self):
         """'return the size of dataset"""
@@ -52,22 +66,45 @@ class TopoplotLoader(data.Dataset):
                   to normalize the data. 
                   
                   hints : Convert the pixel value to [0, 1]
-                          Transpose the image shape from [H, W, C] to [C, H, W]
+                          Transpose the image shape from [T, H, W, C] to [T, C, H, W]
                          
             step4. Return processed image and label
         """
-        path = self.root + '/' + self.img_name[index] + '.png'
-        label = self.label[index]
-        img = io.imread(path)
+        for i_time in range(self.num_time):
+            
+            fileName = self.img_name[index][:-1] + str(i_time)
+            
+            path = '%s/exp%d/%s.png'%(self.root, self.index_exp, fileName)
+            label = self.label[index]
+            img = io.imread(path)
+            
+            '''
+            label = self.label[index]
+            img = self.dict_img[fileName]
+            '''
+
+            # set to pixel value to 0~1
+            img = img/255
+
+            # Choose RGB
+            img = img[:,:,:3]
+            
+            # Scale back
+            if self.scale:
+                for i_channel in range(3):
+                    img[:,:,i_channel] = img[:,:,i_channel] * self.dict_scaler[fileName]['scale'][i_channel]\
+                        + self.dict_scaler[fileName]['min_'][i_channel]
+            
+            if i_time == 0:
+                imgs = np.zeros((self.num_time, img.shape[0], img.shape[1], img.shape[2]))
+            
+            imgs[i_time,:,:,:] = img.copy()
+            
+        if self.num_time == 1:
+            imgs = np.squeeze(imgs, 0)
         
-        # set to pixel value to 0~1
-        img = img/255
-        
-        # Choose first three channels of color
-        img = img[:,:,:3]
-        
-        sample = {'image': img, 'label': label}
-        
+        sample = {'image': imgs, 'label': label}
+
         if self.transform:
             sample = self.transform(sample)
         
@@ -75,43 +112,38 @@ class TopoplotLoader(data.Dataset):
 
 class Rescale(object):
     
-    def __init__(self, output_size):
+    def __init__(self, output_size, num_time=1):
         assert isinstance(output_size, (int, tuple))
         self.output_size = output_size
+        self.num_time = num_time
         
     def __call__(self, sample):
-        image = transform.resize(sample['image'], (self.output_size, self.output_size))
         
-        return {'image': image, 'label': sample['label']}
-
-class RandomCrop(object):
-    def __init__(self, output_size):
-        assert isinstance(output_size, (int, tuple))
-        if isinstance(output_size, int):
-            self.output_size = (output_size, output_size)
+        if self.num_time == 1:
+            image = transform.resize(sample['image'], (self.output_size, self.output_size))
         else:
-            assert len(output_size) == 2
-            self.output_size = output_size
-            
-    def __call__(self, sample):
-        image = sample['image']
-        
-        h, w = image.shape[:2]
-        new_h, new_w = self.output_size
-        
-        top = np.random.randint(0, h-new_h)
-        left = np.random.randint(0, w-new_w)
-        
-        image = image[top: top+new_h, left: left+new_w]
+            imgs = np.zeros((self.num_time, self.output_size, self.output_size, sample['image'].shape[3]))
+            for i_time in range(self.num_time):
+                
+                img = transform.resize(sample['image'][i_time,:], (self.output_size, self.output_size))
+                imgs[i_time,:] = img
+                
+            image = imgs
         
         return {'image': image, 'label': sample['label']}
 
 class ToTensor(object):
     '''Convert ndarrays in sample to Tensors.'''
+    def __init__(self, num_time=1):
+        self.num_time = num_time
     
     def __call__(self, sample):
         image, label = sample['image'], sample['label']
         
-        image = image.transpose((2,0,1))
+        if self.num_time == 1:
+            image = image.transpose((2,0,1))
+        else:
+            image = image.transpose((0,3,1,2))
+            
         return {'image': torch.from_numpy(image).float(), 'label': torch.tensor(label).float()}
     

@@ -100,7 +100,7 @@ def generate_class(Y_SL):
     return Y_class
     
     
-def read_data(diff_type, date = [0], pred_type = 'reg', rm_baseline = False):
+def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
     '''
     Load data from Data_Python and transform them into input and labels
 
@@ -110,8 +110,8 @@ def read_data(diff_type, date = [0], pred_type = 'reg', rm_baseline = False):
         difficulties of interest (1,2,3)
     date : iter
         chosen dates
-    pred_type : str
-        regression (reg) or classification (class)
+    channel_limit : int
+        Number of channels of loaded dataset (12, 21)
     rm_baseline : bool
         Remove baseline before fixation
 
@@ -132,16 +132,15 @@ def read_data(diff_type, date = [0], pred_type = 'reg', rm_baseline = False):
     assert hasattr(date, '__iter__')
     assert all((isinstance(x, int) and 1<=x<=3) for x in diff_type)
     assert isinstance(rm_baseline, bool)
+    assert channel_limit == 12 or channel_limit == 21
     
     # Assign path depending on regression or classification
-    if pred_type == 'reg':
-        channel_limit = 128
+    if channel_limit == 21:
         EEG_path = 'Data_Python'
-        coord_subFileName = '_channels.csv'
-    else:
-        channel_limit = 12
+        coord_subFileName = '_channels_21.csv'
+    elif channel_limit == 12:
         EEG_path = 'Data_Python_Replicate'
-        coord_subFileName = '_channels_class.csv'
+        coord_subFileName = '_channels_12.csv'
     
     # Get list of data names
     df_names = pd.read_csv('%s/Data_Matlab/data_list.csv'%(root_path))
@@ -154,7 +153,10 @@ def read_data(diff_type, date = [0], pred_type = 'reg', rm_baseline = False):
     C_list_diff_date = [[] for x in range(len(diff_type))]   # Channel info
     
     for i_file, fileName in enumerate(data_names):
-        EEG = sio.loadmat('%s/%s/%s.mat'%(root_path, EEG_path, fileName))
+        if channel_limit == 12:
+            EEG = sio.loadmat('%s/%s/%s.mat'%(root_path, EEG_path, fileName))
+        elif channel_limit == 21:
+            EEG = sio.loadmat('%s/%s/%s_21.mat'%(root_path, EEG_path, fileName))
         data = EEG['data']
         events = EEG['event']
         chanlocs = EEG['chanlocs']
@@ -232,25 +234,28 @@ def read_data(diff_type, date = [0], pred_type = 'reg', rm_baseline = False):
     #print('Combined X shape: ', X.shape)
     C = C.astype('int')
     
-    # Remove trials with solution time more than 120 seconds
-    chosen_trials = np.where(Y <= 120)[0]
+    # Remove trials with solution time more than 60 seconds
+    chosen_trials = np.where(Y <= 60)[0]
     X = X[chosen_trials, :, :]
     Y = Y[chosen_trials]
     C = C[chosen_trials]
     
-    print('After removing outliers, X shape: ', X.shape)
+    print('After removing trials longer than 60s, X shape: ', X.shape)
     
     print('Arrange all the channels as the same order\n')
     
     # Order of channels
-    channel_order = pd.read_csv('%s/Channel_coordinate/Channel_location_angle.csv'%(root_path))['Channel'].values
+    if channel_limit == 12:
+        channel_order = pd.read_csv('%s/Channel_coordinate/Channel_location_angle_12.csv'%(root_path))['Channel'].values
+    elif channel_limit == 21:
+        channel_order = pd.read_csv('%s/Channel_coordinate/Channel_location_angle_21.csv'%(root_path))['Channel'].values
     
     # Arrange all the channels in the same order
     for i in range(X.shape[0]):
         date = C[i]
     
         # Read channel locations
-        channel_info = pd.read_csv('%s/Channel_coordinate/%s_channels_class.csv'%(root_path,data_names[date]))
+        channel_info = pd.read_csv('%s/Channel_coordinate/%s'%(root_path,data_names[date]+coord_subFileName))
         channel_info = channel_info.to_numpy()
         
         # Change the order of data
@@ -258,17 +263,12 @@ def read_data(diff_type, date = [0], pred_type = 'reg', rm_baseline = False):
         temp_X = temp_X.reshape((X.shape[1], -1))
         X[i,:] = temp_X
     
-    # Return data, channel and Y_class, Y_reg depending on mode
-    if pred_type == 'class':
-        Y_class = generate_class(Y)
-        return X, Y_class, Y, C
-    else:
-        return X, Y, C
+    return X, Y, C
 
 
 if __name__ == '__main__':
     
     # Test read_data
-    X, Y_class, Y_reg, C = read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline = True)
+    X, Y, C = read_data([1,2,3], list(range(11)), channel_limit=21, rm_baseline = True)
     print('X shape: ', X.shape)
     

@@ -10,18 +10,18 @@ import numpy as np
 import pandas as pd
 import matplotlib.tri as tri
 import matplotlib.pyplot as plt
-import scipy.misc
 from scipy.interpolate import griddata
 from sklearn.model_selection import train_test_split, KFold
 import time
 import argparse
 import pickle
-import os
 
 import dataloader
 import preprocessing
 import data_augmentation
 from PIL import Image
+
+import os
 
 parser = argparse.ArgumentParser(description='Signal to image')
 parser.add_argument('-m', '--mode', default='normal', type=str, help='Generating method')
@@ -31,6 +31,7 @@ parser.add_argument('-r', '--remove_threshold', default=60.0, type=float, help='
 parser.add_argument('-f', '--num_fold', default=1, type=int, help='Number of folds of cross validation')
 parser.add_argument('-s', '--num_split', default=1, type=int, help='If >1, for ensemble methods')
 parser.add_argument('--split_mode', default=3, type=int, help='Mode for spliting training data')
+parser.add_argument('--num_channels', default=21, type=int, help='Number of channels of loaded dataset')
 
 def fig2data ( fig ):
     # draw the renderer
@@ -92,6 +93,7 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
         ERSP_all = ERSP.copy()
         
     num_example = ERSP.shape[0]
+    num_channels = ERSP.shape[1]
     fileNames = np.empty(num_example, dtype=object)
     #dict_img = {}
     dict_scaler = {}
@@ -108,9 +110,8 @@ def generate_topo(ERSP, freqs, num_time=1, train_indices = None, index_exp=0, in
         bandpower = preprocessing.bandpower(ERSP, freqs, lower, higher)
 
         # Read channel information
-        channel_info = pd.read_csv('Channel_location.csv')
+        channel_info = pd.read_csv('./Channel_coordinate/Channel_location_angle_%d.csv'%(num_channels))
         channel_info = channel_info.to_numpy()
-        num_channels = channel_info.shape[0]
 
         # Change coordinate from 0 toward naison to 0 toward right ear
         channel_info[:,2] = 90-channel_info[:,2]
@@ -403,7 +404,17 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time, index_exp=0):
     fileNames = generate_topo(ERSP_concat, freqs, num_time, np.arange(ERSP_dict['train'].shape[0]), index_exp)
     split(fileNames, SLs_concat, len(SLs_dict['test']), random = False, index_exp=index_exp)
     
-    print('[%.1f] Finish S2I'%(time.time()-start_time))
+    print('[%.1f] Finished S2I'%(time.time()-start_time))
+    
+    if args.data_cate == 2:
+        print('Generate conditional entropy of exp%d'%(index_exp))
+        with open('./raw_data/CE_sub100_channel%d.data'%(args.num_channels), 'rb') as fp:
+            CE_all = pickle.load(fp)
+        
+        for model_mode in ['train', 'test']:
+            with open('./raw_data/CE_sub100_channel%d_exp%d_%s.data'%(args.num_channels, index_exp, model_mode), 'wb') as fp:
+                pickle.dump(CE_all[indices[model_mode], :], fp)
+    
     
 def S2I_ensemble(ERSP_all, tmp_all, freqs, indices, num_time, n_split, index_exp=0):
     '''
@@ -502,7 +513,7 @@ if __name__ == '__main__':
     if args.data_cate == 1:
         ERSP_all, tmp_all, freqs = dataloader.load_data()
     elif args.data_cate == 2:
-        with open('./ERSP_from_raw.data', 'rb') as fp:
+        with open('./raw_data/ERSP_from_raw_100_channel%d.data'%(args.num_channels), 'rb') as fp:
             dict_ERSP = pickle.load(fp)
         ERSP_all, tmp_all, freqs = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq']
         print('Shape of ERSP_all: ', ERSP_all.shape)

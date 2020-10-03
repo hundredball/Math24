@@ -8,7 +8,7 @@ data_list = table2array(T_data);
 % default_loc = readlocs('./Channel_coordinate/Standard-10-20-Cap81.locs');
 
 % Load channel of interest
-T = readtable('../Channel_coordinate/Channel_location_angle.xlsx');
+T = readtable('../Channel_coordinate/Channel_location_angle_21.xlsx');
 labels_interest = table2array(T(1:end, 1));  % labels of interest
 coord_interest = table2array(T(1:end, 2:3)); % coordinate of interest
 
@@ -28,7 +28,7 @@ for i_data = 1:size(data_list, 1)
 
         % Remove repetitive label first
         if ~isempty(indice_in_EEG)
-            % fprintf(['[X]' EEG.chanlocs(indice_in_EEG).labels '->XX\n']);
+            fprintf(['[X]' EEG.chanlocs(indice_in_EEG).labels '->XX\n']);
             EEG.chanlocs(indice_in_EEG).labels = 'XX';
         end
 
@@ -51,8 +51,8 @@ for i_data = 1:size(data_list, 1)
     data = EEG.data;
     event = {EEG.event.latency;EEG.event.type}';
     chanlocs = EEG.chanlocs;
-    % save(['../Data_Python_Replicate/' fileName(1:6) '.mat'], 'data', 'event', 'chanlocs');
-    fprintf([int2str(i_data) '. Save ' fileName(1:6) '.mat\n'])
+    save(['../Data_Python/' fileName(1:6) '_21.mat'], 'data', 'event', 'chanlocs');
+    fprintf([int2str(i_data) '. Save ' fileName(1:6) '_21.mat\n'])
 end
 
 % Plot channel locations

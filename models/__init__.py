@@ -11,3 +11,4 @@ from .RCNN import *
 from .mynet import *
 from .eegnet import *
 from .ensemble import *
+from .ELM import *
