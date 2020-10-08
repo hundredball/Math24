@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser(description='Evaluate results')
 parser.add_argument('-n', '--folder_name', default=None, type=str, help='Name of folder in results')
 parser.add_argument('-e', '--num_exp', default=10, type=int, help='Number of experiments in the folder')
 parser.add_argument('--ensemble', dest='ensemble', action='store_true', help='Evaluate ensemble results')
+parser.add_argument('--deepex', dest='deepex', action='store_true', help='Deep network extraction with other regression model')
 
 def plot_error(dict_error, dirName, fileName):
     '''
@@ -119,12 +120,18 @@ if __name__ == '__main__':
         index_split = 0
     
     for i in range(args.num_exp):
-        with open('./results/%s/%s_split%d_exp%d.data'%(args.folder_name, args.folder_name, index_split, i), 'rb') as fp:
+        if args.deepex:
+            data_file = './results/%s/%s_exp%d.data'%(args.folder_name, args.folder_name, i)
+        else:
+            data_file = './results/%s/%s_split%d_exp%d.data'%(args.folder_name, args.folder_name, index_split, i)
+        with open(data_file, 'rb') as fp:
             dict_error = pickle.load(fp)
-        target, pred = dict_error['target'], dict_error['pred'],
-        std, mape = dict_error['test_std'][-1], dict_error['test_MAPE'][-1]
-        std_all += std
-        mape_all += mape
+        target, pred = dict_error['target'], dict_error['pred']
+        
+        if not args.deepex:
+            std, mape = dict_error['test_std'][-1], dict_error['test_MAPE'][-1]
+            std_all += std
+            mape_all += mape
         
         if i == 0:
             target_all, pred_all = target, pred
@@ -132,12 +139,16 @@ if __name__ == '__main__':
             target_all = np.concatenate((target_all, target))
             pred_all = np.concatenate((pred_all, pred))
         
-    std_all /= args.num_exp
-    mape_all /= args.num_exp
-    print('Average standard error of all experiments: %.3f'%(std_all))
-    print('Average Mean Absolute Percentage Error of all experiments : %.3f'%(mape_all))
+    if not args.deepex:
+        std_all /= args.num_exp
+        mape_all /= args.num_exp
+        print('Average standard error of all experiments: %.3f'%(std_all))
+        print('Average Mean Absolute Percentage Error of all experiments : %.3f'%(mape_all))
+        
+        fileName = '%s, Std error: %.3f, MAPE: %.3f'%(args.folder_name, std_all, mape_all)
+    else:
+        fileName = '%s_allFolds'%(args.folder_name)
     
     # Plot scatter
-    fileName = '%s, Std error: %.3f, MAPE: %.3f'%(args.folder_name, std_all, mape_all)
     plot_scatter(target_all, pred_all, args.folder_name, fileName)
     

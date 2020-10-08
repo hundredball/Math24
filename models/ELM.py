@@ -34,11 +34,14 @@ class ELM:
     def hidden_nodes(self, X):
         G = np.dot(X, self.input_weights)
         G = G + self.biases
-        H = self.relu(G)
+        H = self.sigmoid(G)
         return H
     
     def relu(self, x):
         return np.maximum(x,0,x)
+    
+    def sigmoid(self, x):
+        return 1/(1+np.exp(-x))
     
 def elm(input_size, hidden_size):
     return ELM(input_size, hidden_size)

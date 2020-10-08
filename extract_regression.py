@@ -31,38 +31,43 @@ import network_dataloader as ndl
 import evaluate_result
 import preprocessing
 import models
+from scale_target import TargetScaler
 
 parser = argparse.ArgumentParser(description='Deep learning for extracting features, regression model for predicting SL')
 parser.add_argument('-m', '--rgr_model', default='LR', help='Regression model')
+parser.add_argument('-e', '--ext_model', default='vgg16', help='Feature extraction model')
 parser.add_argument('-f', '--image_folder', default='images', help='Folder of images')
 parser.add_argument('-n', '--append_name', default='', type=str, help='Appended name after the file name')
 parser.add_argument('-d', '--data_cate', default=1, type=int, help='Data category (1: PreData, 2: RawData)')
 
-parser.add_argument('--scale', action='store_true', help='Standardize output of extract layer')
+parser.add_argument('--scale', default=None, type=str, help='standard, minmax')
 parser.add_argument('--n_components', dest='n_components', default=0.9, type=float, help='Number of component for PCA')
 parser.add_argument('--add_CE', action='store_true', help='Add conditional entropy after feature extraction')
+parser.add_argument('--scale_target', default=0, type=int, help='0: no, 1: normal, 2: quantization')
+parser.add_argument('--num_fold', type=int, default=1, help='Number of experiments (for cross validation)')
+parser.add_argument('--subject_ID', default=100, type=int, help='Subject ID, 100 for all subjects')
 
-def main():
+def main(index_exp=0):
     
-    global args, device
-    args = parser.parse_args()
     
-    dirName = 'extract_regression'
-    fileName = '%s_data%d_%s'%(args.rgr_model, args.data_cate, args.append_name)
+    dirName = '%s_%s_data%d_%s'%(args.ext_model, args.rgr_model, args.data_cate, args.append_name)
+    fileName = '%s_exp%d'%(dirName, index_exp)
     
     # Create folder for results of this model
     if not os.path.exists('./results/%s'%(dirName)):
         os.makedirs('./results/%s'%(dirName))
-        
-    # Select GPU
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(device)
     
-    print('Extraction model: VGG16')
+    print('Extraction model: %s'%(args.ext_model))
     print('Regression model: %s'%(args.rgr_model))
-
-    net = tv_models.vgg16(pretrained=True).to(device=device)
-    net.classifier[6] = Identity()
+    
+    if args.ext_model == 'vgg16':
+        net = tv_models.vgg16(pretrained=True).to(device=device)
+        set_parameter_requires_grad(net, True)
+        net.classifier[6] = Identity()
+    elif args.ext_model == 'resnet50':
+        net = tv_models.resnet50(pretrained=True).to(device=device)
+        set_parameter_requires_grad(net, True)
+        net.fc = Identity()
     
     # Get dataset
     batchSize = 64
@@ -80,7 +85,7 @@ def main():
     print("Initializing Datasets and Dataloaders...")
     
     # Create training and testing datasets
-    image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, transform=data_transforms[x]) for x in ['train', 'test']}
+    image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, transform=data_transforms[x], index_exp=index_exp) for x in ['train', 'test']}
 
     # Create training and testing dataloaders
     dataloaders_dict = {'train': Data.DataLoader(image_datasets['train'], batch_size=batchSize, shuffle=False, num_workers=4),
@@ -93,9 +98,8 @@ def main():
     
     # Standardize data before PCA
     if args.scale:
-        X_train, X_test = preprocessing.scale(X_train, X_test)
+        X_train, X_test = preprocessing.scale(X_train, X_test, mode=args.scale)
     
-    '''
     # Apply PCA to reduce dimension
     if args.n_components > 1:
         args.n_components = int(args.n_components)
@@ -106,15 +110,15 @@ def main():
     X_test= pca.transform(X_test)
     print('(X) Number of features after PCA: %d'%(X_train.shape[1]))
     print('(X) Explained variance ratio: %.3f'%(np.sum(pca.explained_variance_ratio_)))
-    '''
+    
     
     # Add conditional entropy
     if args.add_CE and args.data_cate==2:
         print('Add conditional entropy as additional features...')
         
-        with open('./raw_data/CE_sub100_channel21_exp0_train.data', 'rb') as fp:
+        with open('./raw_data/CE_sub%d_channel21_exp%d_train.data'%(args.subject_ID, index_exp), 'rb') as fp:
             CE_train = pickle.load(fp)
-        with open('./raw_data/CE_sub100_channel21_exp0_test.data', 'rb') as fp:
+        with open('./raw_data/CE_sub%d_channel21_exp%d_test.data'%(args.subject_ID, index_exp), 'rb') as fp:
             CE_test = pickle.load(fp)
             
         # Scale CE
@@ -144,26 +148,56 @@ def main():
         kernel = RBF(10, (1e-2,1e2)) + ConstantKernel(10, (1e-2,1e2))
         rgr = GaussianProcessRegressor(kernel=kernel, random_state=0)
     elif args.rgr_model == 'ELMK':
-        # Concatenate data for extreme learning machine
-        train_data = np.concatenate((Y_train[:,np.newaxis], X_train_Reg), axis=1)
-        test_data = np.concatenate((Y_test[:,np.newaxis], X_test_Reg), axis=1)
-        
-        elmk = elm.ELMKernel()
-        elmk.search_param(train_data, cv="kfold", of="rmse", eval=10)
-        pred_train = elmk.train(train_data).predicted_targets
-        pred_test = elmk.test(test_data).predicted_targets
+        rgr = elm.ELMKernel()
     elif args.rgr_model == 'ELMR':
-        rgr = models.elm(X_train_Reg.shape[1], 500)
+        params = ["sigmoid", 1, 500, False]
+        rgr= elm.ELMRandom(params)
         
-    if args.rgr_model not in ['ELMK']:
+    if args.rgr_model not in ['ELMK', 'ELMR']:
         rgr.fit(X_train_Reg, Y_train)
         pred_train = rgr.predict(X_train_Reg)
         pred_test = rgr.predict(X_test_Reg)
+    else:
+        # Scale target into -1~1
+        if args.scale_target == 2:
+                    
+            scaler = TargetScaler(num_step=10)
+            scaler.fit(Y_train)
+            Y_train, Y_test = scaler.transform(Y_train), scaler.transform(Y_test)
+        elif args.scale_target == 1:
+            
+            Y_train, Y_test = (Y_train-30)/30, (Y_test-30)/30
+            
+        
+        # Concatenate data for extreme learning machine
+        train_data = np.concatenate((Y_train[:,np.newaxis], X_train), axis=1)
+        test_data = np.concatenate((Y_test[:,np.newaxis], X_test), axis=1)
+        
+        rgr.search_param(train_data, cv="kfold", of="rmse", eval=10)
+        
+        pred_train = rgr.train(train_data).predicted_targets
+        pred_test = rgr.test(test_data).predicted_targets
+        
+        # Scale target back to 0~60
+        if args.scale_target == 2:
+            
+            [Y_train, Y_test, pred_train, pred_test] = [scaler.transform(x, mode='inverse') for x in \
+                                           [Y_train, Y_test, pred_train, pred_test]]
+        elif args.scale_target == 1:
+            
+            [Y_train, Y_test, pred_train, pred_test] = [x*30+30 for x in \
+                                           [Y_train, Y_test, pred_train, pred_test]]
     
     evaluate_result.plot_scatter(Y_test, pred_test, dirName, fileName)
     
     print('Train std: %.3f'%(mean_squared_error(Y_train, pred_train)**0.5))
     print('Test std: %.3f'%(mean_squared_error(Y_test, pred_test)**0.5))
+    
+    # Save targets and predictions
+    dict_target = {}
+    dict_target['target'], dict_target['pred'] = Y_test, pred_test
+    with open('./results/%s/%s.data'%(dirName, fileName), 'wb') as fp:
+        pickle.dump(dict_target, fp)
     
     return
 
@@ -208,8 +242,22 @@ class Identity(nn.Module):
         
     def forward(self, x):
         return x
+    
+def set_parameter_requires_grad(model, feature_extracting):
+    if feature_extracting:
+        for param in model.parameters():
+            param.requires_grad = False
 
 if __name__ == '__main__':
-    main()
+    global args, device
+    args = parser.parse_args()
+    
+    # Select GPU
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(device)
+    
+    for i_exp in range(args.num_fold):
+        print('------ Experiment %d ------'%(i_exp))
+        main(i_exp)
     
     

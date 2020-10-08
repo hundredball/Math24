@@ -8,7 +8,7 @@ Created on Sat Jul 11 10:28:06 2020
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from scipy.integrate import simps
 import random as rand
 import dataloader
@@ -156,9 +156,9 @@ def center(train, test):
     
     return train, test
 
-def scale(train, test):
+def scale(train, test, mode='standard'):
     '''
-    Standardize training and testing data according to training data
+    Scale training and testing data according to training data
 
     Parameters
     ----------
@@ -166,6 +166,8 @@ def scale(train, test):
         Training data
     test : np.ndarray (epoch, features)
         Testing data
+    mode : str
+        For each feature, standard (mean,std)=(0,1), minmax (min,max)=(0,1)
 
     Returns
     -------
@@ -177,9 +179,13 @@ def scale(train, test):
     '''
     assert isinstance(train, np.ndarray) and train.ndim==2
     assert isinstance(test, np.ndarray) and test.ndim==2
+    assert mode == 'standard' or 'minmax'
     
-    print('Standardize the data...')
-    scaler = StandardScaler()
+    print('Scale the data (%s)'%(mode))
+    if mode == 'standard':
+        scaler = StandardScaler()
+    elif mode == 'minmax':
+        scaler = MinMaxScaler()
     scaler.fit(train)
     train = scaler.transform(train)
     test = scaler.transform(test)

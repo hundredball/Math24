@@ -32,6 +32,7 @@ parser.add_argument('-f', '--num_fold', default=1, type=int, help='Number of fol
 parser.add_argument('-s', '--num_split', default=1, type=int, help='If >1, for ensemble methods')
 parser.add_argument('--split_mode', default=3, type=int, help='Mode for spliting training data')
 parser.add_argument('--num_channels', default=21, type=int, help='Number of channels of loaded dataset')
+parser.add_argument('--subject_ID', default=100, type=int, help='Subject ID, 100 for all subjects')
 
 def fig2data ( fig ):
     # draw the renderer
@@ -406,14 +407,15 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time, index_exp=0):
     
     print('[%.1f] Finished S2I'%(time.time()-start_time))
     
-    if args.data_cate == 2:
-        print('Generate conditional entropy of exp%d'%(index_exp))
-        with open('./raw_data/CE_sub100_channel%d.data'%(args.num_channels), 'rb') as fp:
-            CE_all = pickle.load(fp)
-        
-        for model_mode in ['train', 'test']:
-            with open('./raw_data/CE_sub100_channel%d_exp%d_%s.data'%(args.num_channels, index_exp, model_mode), 'wb') as fp:
-                pickle.dump(CE_all[indices[model_mode], :], fp)
+    if mode == 'normal':
+        if args.data_cate == 2:
+            print('Generate conditional entropy of exp%d'%(index_exp))
+            with open('./raw_data/CE_sub%d_channel%d.data'%(args.subject_ID, args.num_channels), 'rb') as fp:
+                CE_all = pickle.load(fp)
+            
+            for model_mode in ['train', 'test']:
+                with open('./raw_data/CE_sub%d_channel%d_exp%d_%s.data'%(args.subject_ID, args.num_channels, index_exp, model_mode), 'wb') as fp:
+                    pickle.dump(CE_all[indices[model_mode], :], fp)
     
     
 def S2I_ensemble(ERSP_all, tmp_all, freqs, indices, num_time, n_split, index_exp=0):
@@ -513,7 +515,7 @@ if __name__ == '__main__':
     if args.data_cate == 1:
         ERSP_all, tmp_all, freqs = dataloader.load_data()
     elif args.data_cate == 2:
-        with open('./raw_data/ERSP_from_raw_100_channel%d.data'%(args.num_channels), 'rb') as fp:
+        with open('./raw_data/ERSP_from_raw_%d_channel%d.data'%(args.subject_ID, args.num_channels), 'rb') as fp:
             dict_ERSP = pickle.load(fp)
         ERSP_all, tmp_all, freqs = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq']
         print('Shape of ERSP_all: ', ERSP_all.shape)
