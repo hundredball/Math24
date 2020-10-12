@@ -21,6 +21,7 @@ import dataloader
 import preprocessing
 import data_augmentation
 import network_dataloader as ndl
+from scale_target import TargetScaler
 from evaluate_result import plot_error, plot_scatter
 
 import os,sys,inspect
@@ -45,6 +46,7 @@ parser.add_argument('--split_mode', default=1, type=int, help='Mode for spliting
 parser.add_argument('--normalize', dest='normalize', action='store_true', help='Electrode-wise exponential moving standardization for signal')
 parser.add_argument('--scale_image', dest='scale_image', action='store_true', help='Scale image based on their original values')
 parser.add_argument('--scale_data', dest='scale_data', action='store_true', help='Standardize data before feeding into net')
+parser.add_argument('--scale_target', dest='scale_target', action='store_true', help='Scale the target quantizationally')
 parser.add_argument('--center', dest='center_flag', action='store_true', help='Center data before feeding into the net')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate the trained model')
 parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate')
@@ -288,8 +290,36 @@ def main(index_exp, index_split):
         
         model_param = [input_size]
         
+    elif args.input_type == 'EEGLearn_img':
+        
+        # Load data
+        with open('./EEGLearn_imgs/data1.data', 'rb') as fp:
+            dict_data = pickle.load(fp)
+        data, target = dict_data['data'], dict_data['target']
+        input_size = data.shape[2]
+        
+        # Split data for cross validation
+        if args.num_fold == 1:
+            train_data, test_data, train_target, test_target = train_test_split(data, target, test_size=0.1, random_state=23)
+            # Random state 15: training error becomes lower, testing error becomes higher
+        else:
+            kf = KFold(n_splits=args.num_fold, shuffle=True, random_state=23)
+            for i, (train_index, test_index) in enumerate(kf.split(data)):
+                if i == index_exp:
+                    train_data, train_target = data[train_index, :], target[train_index]
+                    test_data, test_target = data[test_index, :], target[test_index]
+        
+        (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
+                torch.from_numpy, (train_data, train_target, test_data, test_target))
+        [train_dataset,test_dataset] = map(\
+                Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
+
+        train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
+        test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
+        
+        
     # ------------ Create model ---------------
-    if args.input_type == 'image':
+    if args.input_type in ['image','EEGLearn_img']:
         model_param = [input_size]
     else:
         model_param = [train_data.shape]
@@ -417,7 +447,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
     for i, sample in enumerate(train_loader):
         
-        if args.input_type in ['signal', 'power']:
+        if args.input_type in ['signal', 'power', 'EEGLearn_img']:
             input, target = sample[0], sample[1]
         elif args.input_type in ['image']:
             input, target = sample['image'], sample['label']
@@ -433,6 +463,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         # compute output
         output = model(input_var)
+        output = output.flatten()
         loss = criterion(output, target_var)
         losses.update(loss.data.item(), input.size(0))
 
@@ -482,7 +513,7 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, sample in enumerate(val_loader):
         
-        if args.input_type in ['signal', 'power']:
+        if args.input_type in ['signal', 'power', 'EEGLearn_img']:
             input, target = sample[0], sample[1]
         elif args.input_type in ['image']:
             input, target = sample['image'], sample['label']
@@ -496,6 +527,7 @@ def validate(val_loader, model, criterion):
         # compute output
         with torch.no_grad():
             output = model(input_var)
+            output = output.flatten()
         loss = criterion(output, target_var)
         
         # measure accuracy and record loss
@@ -581,7 +613,7 @@ def set_parameter_requires_grad(model, feature_extracting):
             
 def read_model(modelName, model_param):
     
-    if args.input_type == 'image':
+    if args.input_type in ['image', 'EEGLearn_img']:
         input_size = model_param[0]
     else:
         shape_train = model_param[0]

@@ -179,7 +179,7 @@ def scale(train, test, mode='standard'):
     '''
     assert isinstance(train, np.ndarray) and train.ndim==2
     assert isinstance(test, np.ndarray) and test.ndim==2
-    assert mode == 'standard' or 'minmax'
+    assert mode == 'standard' or mode == 'minmax'
     
     print('Scale the data (%s)'%(mode))
     if mode == 'standard':
