@@ -86,11 +86,12 @@ def plot_scatter(true, pred, dirName, fileName):
     
     sort_indices = np.argsort(true)
     fig, axs = plt.subplots(1,2, figsize=(8,4))
+    mape = np.sum( np.abs( (true-pred)/true ) ) / true.shape[0]
     axs[0].plot(range(len(true)), true[sort_indices], 'r.', range(len(true)), pred[sort_indices], 'b.')
     axs[0].set_xlabel('Record number')
     axs[0].set_ylabel('Solution latency')
     axs[0].legend(('True', 'Pred'))
-    axs[0].set_title('std error = %.3f'%(mean_squared_error(true, pred)**0.5))
+    axs[0].set_title('std error = %.3f, MAPE = %.3f'%(mean_squared_error(true, pred)**0.5, mape))
     
     max_value = np.max(np.hstack((true, pred)))
     axs[1].scatter(true, pred, marker='.')

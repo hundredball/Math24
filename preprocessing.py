@@ -271,6 +271,79 @@ def stratified_split(X, Y, n_split=3, mode=1):
     
     return X_list, Y_list
 
+def bandpower(ERSP, freqs, low, high):
+    '''
+    Get bandpower from ERSP
+
+    Parameters
+    ----------
+    ERSP : 3d numpy array (epoch, channel, freq_step)
+        ERSP of all trials
+    freqs : 1d numpy array
+        frequency step of ERSP
+    low : list
+        lower bound
+    high : list
+        upper bound
+
+    Returns
+    -------
+    bandpower : 3d numpy array (epoch, channel, band)
+        Bandpower of given bands
+
+    '''
+    assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 3
+    assert isinstance(freqs, np.ndarray) and freqs.ndim == 1
+    assert all([low[i]<high[i] for i in range(len(low))]) and len(low) == len(high)
+    
+    freq_res = freqs[1]-freqs[0]
+    for i in range(len(low)):
+        index_freq = np.logical_and(freqs>low[i], freqs<high[i])
+        bandpower_i = simps(ERSP[:,:,index_freq], dx=freq_res, axis=2).reshape((ERSP.shape[0],ERSP.shape[1],1))
+        if i == 0:
+            bandpower = bandpower_i
+        else:
+            bandpower = np.concatenate((bandpower, bandpower_i), axis=2)
+    
+    return bandpower
+
+def remove_trials(ERSP_all, tmp_all, threshold):
+    '''
+    Remove trials with solution latency larger than threshold
+
+    Parameters
+    ----------
+    ERSP_all : nd numpy array (epoch, ...)
+        All data
+    tmp_all : nd numpy array (epoch, time_periods)
+        time_periods include time points of fixation, cue, end
+        or solution latency
+    threshold : float or int
+        Threshold of removing trials
+    Returns
+    -------
+    ERSP_rem : 2d numpy array (epoch, features)
+        Data after removing trials
+    tmp_rem : 2d numpy array (epoch, time_periods)
+        time_periods include time points of fixation, cue, end after removing trials
+    
+    '''
+    assert isinstance(ERSP_all, np.ndarray)
+    assert isinstance(tmp_all, np.ndarray)
+    assert isinstance(threshold, int) or isinstance(threshold, float)
+    assert threshold > 0
+    
+    # Remove trials with SLs >= threshold
+    if tmp_all.ndim == 2:
+        remove_indices = np.where(tmp_all[:,2]>=threshold)[0]
+    elif tmp_all.ndim == 1:
+        remove_indices = np.where(tmp_all>=threshold)[0]
+    ERSP_rem = np.delete(ERSP_all, remove_indices, axis=0)
+    tmp_rem = np.delete(tmp_all, remove_indices, axis=0)
+    print('> Remove %d trials (%.3f sec)'%(tmp_all.shape[0]-tmp_rem.shape[0], threshold))
+    
+    return ERSP_rem, tmp_rem
+
 def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None):
     '''
     Select ERSP whose correlation with solution latency is larger than threshold
@@ -327,42 +400,6 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
     print('Select %d features'%(np.sum(select_indices)))
     
     return select_ERSP, select_indices
-
-def bandpower(ERSP, freqs, low, high):
-    '''
-    Get bandpower from ERSP
-
-    Parameters
-    ----------
-    ERSP : 3d numpy array (epoch, channel, freq_step)
-        ERSP of all trials
-    freqs : 1d numpy array
-        frequency step of ERSP
-    low : list
-        lower bound
-    high : list
-        upper bound
-
-    Returns
-    -------
-    bandpower : 3d numpy array (epoch, channel, band)
-        Bandpower of given bands
-
-    '''
-    assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 3
-    assert isinstance(freqs, np.ndarray) and freqs.ndim == 1
-    assert all([low[i]<high[i] for i in range(len(low))]) and len(low) == len(high)
-    
-    freq_res = freqs[1]-freqs[0]
-    for i in range(len(low)):
-        index_freq = np.logical_and(freqs>low[i], freqs<high[i])
-        bandpower_i = simps(ERSP[:,:,index_freq], dx=freq_res, axis=2).reshape((ERSP.shape[0],ERSP.shape[1],1))
-        if i == 0:
-            bandpower = bandpower_i
-        else:
-            bandpower = np.concatenate((bandpower, bandpower_i), axis=2)
-    
-    return bandpower
 
 def trimData(ERSP_all, tmp_all):
     
@@ -531,43 +568,6 @@ def PCA_corr(X_train, Y_train, X_test=None, num_features=2):
         return X_train, X_test
     
     return X_train
-
-def remove_trials(ERSP_all, tmp_all, threshold):
-    '''
-    Remove trials with solution latency larger than threshold
-
-    Parameters
-    ----------
-    ERSP_all : nd numpy array (epoch, ...)
-        All data
-    tmp_all : nd numpy array (epoch, time_periods)
-        time_periods include time points of fixation, cue, end
-        or solution latency
-    threshold : float or int
-        Threshold of removing trials
-    Returns
-    -------
-    ERSP_rem : 2d numpy array (epoch, features)
-        Data after removing trials
-    tmp_rem : 2d numpy array (epoch, time_periods)
-        time_periods include time points of fixation, cue, end after removing trials
-    
-    '''
-    assert isinstance(ERSP_all, np.ndarray)
-    assert isinstance(tmp_all, np.ndarray)
-    assert isinstance(threshold, int) or isinstance(threshold, float)
-    assert threshold > 0
-    
-    # Remove trials with SLs >= threshold
-    if tmp_all.ndim == 2:
-        remove_indices = np.where(tmp_all[:,2]>=threshold)[0]
-    elif tmp_all.ndim == 1:
-        remove_indices = np.where(tmp_all>=threshold)[0]
-    ERSP_rem = np.delete(ERSP_all, remove_indices, axis=0)
-    tmp_rem = np.delete(tmp_all, remove_indices, axis=0)
-    print('> Remove %d trials (%.3f sec)'%(tmp_all.shape[0]-tmp_rem.shape[0], threshold))
-    
-    return ERSP_rem, tmp_rem
 
 if __name__ == '__main__':
     

@@ -16,6 +16,7 @@ import torch.utils.data as Data
 import torchvision
 import torchvision.models as tv_models
 import torchvision.transforms as transforms
+from torch.utils.data.sampler import SubsetRandomSampler
 
 import dataloader
 import preprocessing
@@ -47,6 +48,7 @@ parser.add_argument('--normalize', dest='normalize', action='store_true', help='
 parser.add_argument('--scale_image', dest='scale_image', action='store_true', help='Scale image based on their original values')
 parser.add_argument('--scale_data', dest='scale_data', action='store_true', help='Standardize data before feeding into net')
 parser.add_argument('--scale_target', dest='scale_target', action='store_true', help='Scale the target quantizationally')
+parser.add_argument('--str_sampling', dest='str_sampling', action='store_true', help='Stratified sampling for dataloader')
 parser.add_argument('--center', dest='center_flag', action='store_true', help='Center data before feeding into the net')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate the trained model')
 parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate')
@@ -81,7 +83,7 @@ def main(index_exp, index_split):
     
     # ------------- Wrap up dataloader -----------------
     if args.input_type == 'signal':
-        X, _, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), pred_type='class', rm_baseline=True)
+        X, Y_reg, C = raw_dataloader.read_data([1,2,3], list(range(11)), channel_limit=21, rm_baseline=True)
         num_channel = X.shape[1]
         num_feature = X.shape[2]     # Number of time sample
         
@@ -148,7 +150,8 @@ def main(index_exp, index_split):
         [train_dataset,test_dataset] = map(\
                 Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
 
-        train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
+        if not args.str_sampling:
+            train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
         
         model_param = [train_data.shape]
@@ -157,7 +160,7 @@ def main(index_exp, index_split):
         if args.data_cate == 1:
             ERSP_all, tmp_all, freqs = dataloader.load_data()
         elif args.data_cate == 2:
-            data_file = './raw_data/ERSP_from_raw_%d.data'%(args.index_sub)
+            data_file = './raw_data/ERSP_from_raw_%d_channel21.data'%(args.index_sub)
             with open(data_file, 'rb') as fp:
                 dict_ERSP = pickle.load(fp)
             ERSP_all, tmp_all = dict_ERSP['ERSP'], dict_ERSP['SLs']
@@ -248,7 +251,8 @@ def main(index_exp, index_split):
         [train_dataset,test_dataset] = map(\
                 Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
 
-        train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
+        if not args.str_sampling:
+            train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
         
         model_param = [train_data.shape]
@@ -281,13 +285,18 @@ def main(index_exp, index_split):
         print("Initializing Datasets and Dataloaders...")
 
         # Create training and testing datasets
-        image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x],
-                        scale=args.scale_image, index_exp=index_exp, index_split=index_split) for x in ['train', 'test']}
+        # image_datasets = {x: ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x],
+        #                 scale=args.scale_image, index_exp=index_exp, index_split=index_split) for x in ['train', 'test']}
+        [train_dataset,test_dataset] = [ndl.TopoplotLoader(args.image_folder, x, args.num_time, data_transforms[x],
+                        scale=args.scale_image, index_exp=index_exp, index_split=index_split) for x in ['train', 'test']]
 
         # Create training and testing dataloaders
-        train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, num_workers=4)
-        test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.batch_size, shuffle=False, num_workers=4)
-        
+        # if not args.str_sampling:
+        #     train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, num_workers=4)
+        # test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.batch_size, shuffle=False, num_workers=4)
+        if not args.str_sampling:
+            train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+        test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
         model_param = [input_size]
         
     elif args.input_type == 'EEGLearn_img':
@@ -314,7 +323,8 @@ def main(index_exp, index_split):
         [train_dataset,test_dataset] = map(\
                 Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
 
-        train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size)
+        if not args.str_sampling:
+            train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         test_loader = Data.DataLoader(test_dataset, batch_size=args.batch_size)
         
         
@@ -391,7 +401,12 @@ def main(index_exp, index_split):
     # ------------- Train model ------------------
 
     for epoch in range(args.start_epoch, args.num_epoch):
-        
+        # Create dataloader if using stratified sampler
+        if args.str_sampling:
+            sampler = SubsetRandomSampler(get_indices_RSS(train_target, int(0.5*len(train_target))))
+            train_loader = Data.DataLoader(train_dataset, batch_size=args.batch_size, \
+                                           sampler=sampler, num_workers=4)
+            
         # Learning rate decay
         if epoch in lr_step:
             for param_group in optimizer.param_groups:
@@ -428,6 +443,13 @@ def main(index_exp, index_split):
     _, target, pred, _, _ = validate(test_loader, model, criterion)
     plot_scatter(target, pred, dirName, fileName)
     dict_error['target'], dict_error['pred'] = target, pred
+    
+    # Plot histogram
+    import matplotlib.pyplot as plt
+    plt.hist(target, label = 'True')
+    plt.hist(pred, label = 'Pred')
+    plt.legend(loc='upper right')
+    plt.savefig('./results/hist.png')
     
     # Save error over epochs
     with open('./results/%s/%s.data'%(dirName, fileName), 'wb') as fp:
@@ -624,9 +646,9 @@ def read_model(modelName, model_param):
         set_parameter_requires_grad(model, True)
         
         model.classifier[0] = nn.Linear(model.classifier[0].in_features, model.classifier[0].out_features)
-        model.classifier[1] = nn.Sigmoid()
+        model.classifier[1] = nn.ReLU()
         model.classifier[3] = nn.Linear(model.classifier[3].in_features, model.classifier[3].out_features)
-        model.classifier[4] = nn.Sigmoid()
+        model.classifier[4] = nn.ReLU()
         
         model.classifier[6] = nn.Linear(model.classifier[6].in_features,1)
     elif modelName == 'resnet50':
@@ -649,7 +671,46 @@ def read_model(modelName, model_param):
         
         
     return model
+
+def get_indices_RSS(targets, num_samples):
+    '''
+    Get indices for RandomSubsetSampler
+
+    Parameters
+    ----------
+    targets : np.ndarray
+        Solution latency
+    num_samples : int
+        Number of samples to draw
+
+    Returns
+    -------
+    indices : np.ndarray
+        Chosen indices
+
+    '''
+    assert isinstance(targets, np.ndarray)
+    assert isinstance(num_samples, int) and num_samples>0
     
+    # Calculate weights according to inverse distribution
+    hist, bin_edges = np.histogram(targets, bins=10)
+    zero_range = np.where(hist==0)[0]
+    weights = 1/hist
+    
+    # Choose samples according to probs
+    probs = np.zeros(len(targets))
+    for i in range(len(targets)):
+        for j in range(len(hist)):
+            if j in zero_range:
+                continue
+            if bin_edges[j]<targets[i]<=bin_edges[j+1]:
+                probs[i] = weights[j]
+    probs = probs/np.sum(probs)
+    
+    indices = np.arange(len(targets))
+    indices = np.random.choice(indices, size=num_samples, p=probs, replace=True)
+    
+    return indices
 
 if __name__ == '__main__':
     global device, args
