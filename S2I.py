@@ -33,6 +33,7 @@ parser.add_argument('-s', '--num_split', default=1, type=int, help='If >1, for e
 parser.add_argument('--split_mode', default=3, type=int, help='Mode for spliting training data')
 parser.add_argument('--num_channels', default=21, type=int, help='Number of channels of loaded dataset')
 parser.add_argument('--subject_ID', default=100, type=int, help='Subject ID, 100 for all subjects')
+parser.add_argument('--normal_sub', action='store_true', help='Normalize subjects by mean power')
 
 def fig2data ( fig ):
     # draw the renderer
@@ -343,7 +344,7 @@ def generate_csv(fileNames, SLs, index_exp, index_split):
     print('Generated files for dataset referencing')
     
     
-def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time, index_exp=0):
+def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time, index_exp=0, sub_ID=None):
     '''
     Standardize data, then generate topo
 
@@ -385,6 +386,11 @@ def S2I_main(ERSP_all, tmp_all, freqs, indices, mode, num_time, index_exp=0):
     
     # Standardize the data
     ERSP_all, SLs = preprocessing.standardize(ERSP_all, tmp_all, num_time, train_indices=indices['train'], threshold=0.0)
+    
+    # Normalize subjects
+    if args.normal_sub:
+        ERSP_all = preprocessing.normalize_subject(ERSP_all, sub_ID, indices['train'])
+    
     ERSP_dict = {kind : ERSP_all[indices[kind],:] for kind in ['train','test']}
     SLs_dict = {kind : SLs[indices[kind]] for kind in ['train','test']}
     
@@ -515,9 +521,15 @@ if __name__ == '__main__':
     if args.data_cate == 1:
         ERSP_all, tmp_all, freqs = dataloader.load_data()
     elif args.data_cate == 2:
-        with open('./raw_data/ERSP_from_raw_%d_channel%d.data'%(args.subject_ID, args.num_channels), 'rb') as fp:
-            dict_ERSP = pickle.load(fp)
-        ERSP_all, tmp_all, freqs = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq']
+        if args.normal_sub:
+            with open('./raw_data/ERSP_from_raw_%d_channel%d_nolog.data'%(args.subject_ID, args.num_channels), 'rb') as fp:
+                dict_ERSP = pickle.load(fp)
+            ERSP_all, tmp_all, freqs, S_all = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq'], dict_ERSP['Sub_ID']
+        else:
+            with open('./raw_data/ERSP_from_raw_%d_channel%d.data'%(args.subject_ID, args.num_channels), 'rb') as fp:
+                dict_ERSP = pickle.load(fp)
+            ERSP_all, tmp_all, freqs = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['freq']
+            S_all = None
         print('Shape of ERSP_all: ', ERSP_all.shape)
     
     #ERSP_all, tmp_all = ERSP_all[:10, :], tmp_all[:10, :]
@@ -530,7 +542,7 @@ if __name__ == '__main__':
     if args.num_fold == 1:
         indices['train'], indices['test'] = train_test_split(np.arange(ERSP_all.shape[0]), test_size=0.1, random_state=42)
         if args.num_split == 1:
-            S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time)
+            S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time, sub_ID=S_all)
         else:
             S2I_ensemble(ERSP_all, tmp_all, freqs, indices, args.num_time, args.num_split)
     else:
@@ -538,7 +550,7 @@ if __name__ == '__main__':
         for i, (indices['train'], indices['test']) in enumerate(kf.split(ERSP_all)):
             print('--- Experiment %d ---'%(i))
             if args.num_split == 1:
-                S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time, index_exp=i)
+                S2I_main(ERSP_all, tmp_all, freqs, indices, args.mode, args.num_time, index_exp=i, sub_ID=S_all)
             else:
                 S2I_ensemble(ERSP_all, tmp_all, freqs, indices, args.num_time, args.num_split, index_exp=i)
     

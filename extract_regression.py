@@ -39,7 +39,6 @@ parser.add_argument('-e', '--ext_model', default='vgg16', help='Feature extracti
 parser.add_argument('-f', '--image_folder', default='images', help='Folder of images')
 parser.add_argument('-n', '--append_name', default='', type=str, help='Appended name after the file name')
 parser.add_argument('-d', '--data_cate', default=1, type=int, help='Data category (1: PreData, 2: RawData)')
-parser.add_argument('-i', '--input_type', default='img', type=str, help='img: S2I, EEG_img: EEGLearn_S2I')
 
 parser.add_argument('--scale', default=None, type=str, help='standard, minmax')
 parser.add_argument('--n_components', dest='n_components', default=0.9, type=float, help='Number of component for PCA')

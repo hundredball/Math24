@@ -6,6 +6,7 @@ Created on Sat Jul 11 10:28:06 2020
 @author: hundredball
 """
 
+import pickle
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -73,6 +74,44 @@ def standardize(ERSP, tmp, num_time=1, train_indices=None, threshold=5.0):
         ERSP_avg = np.squeeze(ERSP_avg, axis=3)
         
     return ERSP_avg, SLs
+
+def normalize_subject(data, sub_ID, train_indices):
+    '''
+    Normalize each subjects by total power
+
+    Parameters
+    ----------
+    data : np.ndarray (epoch, channel, freqs)
+        ERSP of all data
+    sub_ID : numpy 1d array
+        Subject ID
+    train_indices : numpy 1d array
+        Indices for training data
+
+    Returns
+    -------
+    data : np.ndarray (epoch, channel, freqs)
+        ERSP of all data after normalizing
+
+    '''
+    assert isinstance(data, np.ndarray) and data.ndim==3
+    assert isinstance(sub_ID, np.ndarray) and sub_ID.ndim==1
+    assert isinstance(train_indices, np.ndarray) and train_indices.ndim==1
+    
+    print('Normalize subjects...')
+    
+    for i_sub in range(len(np.unique(sub_ID))):
+        
+        # Calculate scaler
+        bool_train = np.array([(x in train_indices) for x in range(len(data))])
+        indices_sub_train = np.logical_and(sub_ID == i_sub, bool_train)
+        scaler = np.sum(data[indices_sub_train,:])/np.count_nonzero(indices_sub_train)
+        
+        # Scale training and testing data
+        indices_sub = np.where(sub_ID == i_sub)[0]
+        data[indices_sub,:] = data[indices_sub,:]/scaler
+    
+    return data
 
 def normalize(train, test):
     '''
@@ -571,6 +610,7 @@ def PCA_corr(X_train, Y_train, X_test=None, num_features=2):
 
 if __name__ == '__main__':
     
+    '''
     ERSP_all, tmp_all, freqs = dataloader.load_data()
     ERSP_all, SLs = standardize(ERSP_all, tmp_all)
     bandpower_all = bandpower(ERSP_all, freqs, [4], [30])
@@ -591,7 +631,20 @@ if __name__ == '__main__':
     print('Mean of test: ', np.mean(test, axis=0))
     print('Std of train: ', np.std(train, axis=0))
     print('Std of test: ', np.std(test, axis=0))
+    '''
     
+    with open('./raw_data/ERSP_from_raw_100_channel21.data', 'rb') as fp:
+        dict_ERSP = pickle.load(fp)
+
+    ERSP_all, tmp_all, freqs, t, sub_ID = dict_ERSP['ERSP'], dict_ERSP['SLs'], \
+        dict_ERSP['freq'], dict_ERSP['t'], dict_ERSP['Sub_ID']
+        
+    train_indices = np.random.choice(np.arange(len(ERSP_all)), size=500)
+    
+    ERSP_all, SLs = standardize(ERSP_all, tmp_all)
+    
+    # Test normalize_subject
+    ERSP_all = normalize_subject(ERSP_all, sub_ID, train_indices)
     
     
     
