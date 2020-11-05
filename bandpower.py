@@ -61,7 +61,7 @@ def get_bandpower(data, low = [4,7,13], high=[7,13,30]):
 
     return powers
 
-def STFT(data, SLs, channels, subjects, low, high, savePath=None):
+def STFT(data, SLs, subjects, D, low, high, savePath=None):
     '''
     Adopt STFT to data to get ERSP, and finally save it
 
@@ -73,10 +73,10 @@ def STFT(data, SLs, channels, subjects, low, high, savePath=None):
         k : sample
     SLs : numpy 1D array
         solution latency of each data
-    channels : numpy 1D array
-        Number of channel file
     subjects : numpy 1D array
         Subject IDs
+    D : numpy 1D array
+        Difficulty levels
     low : int
         Lower frequency bound
     high : int
@@ -95,8 +95,8 @@ def STFT(data, SLs, channels, subjects, low, high, savePath=None):
 
     assert isinstance(data, np.ndarray) and data.ndim == 3
     assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
-    assert isinstance(channels, np.ndarray) and channels.ndim == 1
     assert isinstance(subjects, np.ndarray) and SLs.ndim == 1
+    assert isinstance(D, np.ndarray) and D.ndim==1
     assert isinstance(low, int) and isinstance(high, int)
     assert (high >= low >= 0)
     
@@ -116,11 +116,9 @@ def STFT(data, SLs, channels, subjects, low, high, savePath=None):
     # Remove imaginary part
     Zxx = abs(Zxx)
     
-    '''
     # Transform to dB power
     print('Transform to dB')
     Zxx = 10*np.log10(Zxx)
-    '''
     
     # Find intersecting values in frequency vector
     idx = np.logical_and(new_f >= low, new_f <= high)
@@ -132,7 +130,7 @@ def STFT(data, SLs, channels, subjects, low, high, savePath=None):
     
     # Save to pickle file
     if savePath is not None:
-        dict_ERSP = {'freq':new_f, 't':t, 'ERSP':Zxx, 'SLs':SLs, 'Sub_ID': subjects}
+        dict_ERSP = {'freq':new_f, 't':t, 'ERSP':Zxx, 'SLs':SLs, 'Sub_ID': subjects, 'D': D}
         with open(savePath, 'wb') as fp:
             pickle.dump(dict_ERSP, fp)
     
@@ -143,9 +141,10 @@ if __name__ == '__main__':
     channel_limit = 21
     
     # Save data for all subject
-    X, Y_reg, channels, S = dl.read_data([1,2,3], list(range(11)), channel_limit=channel_limit, rm_baseline=True)
-    freq, t, Zxx = STFT(X, Y_reg, channels, S, 2, 30, savePath='./raw_data/ERSP_from_raw_100_channel%d_nolog.data'%(channel_limit))
+    X, Y_reg, channels, S, D = dl.read_data([1,2,3], list(range(11)), channel_limit=channel_limit, rm_baseline=True)
+    freq, t, Zxx = STFT(X, Y_reg, S, D, 2, 30, savePath='./raw_data/ERSP_from_raw_100_channel%d.data'%(channel_limit))
     
+    '''
     print('Calculate conditional entropy...')
     _ = add_features.calculate_CE(X, './raw_data/CE_sub100_channel%d.data'%(channel_limit))
     
@@ -156,8 +155,9 @@ if __name__ == '__main__':
         X, Y_reg, channels, S = dl.read_data([1,2,3], [i_sub], channel_limit=channel_limit, rm_baseline=True)
     
         # Adopt STFT and save file
-        freq, t, Zxx  = STFT(X, Y_reg, channels, S, 2, 30, savePath='./raw_data/ERSP_from_raw_%s_channel%d_nolog.data'%(str(i_sub), channel_limit))
+        freq, t, Zxx  = STFT(X, Y_reg, S, 2, 30, savePath='./raw_data/ERSP_from_raw_%s_channel%d_nolog.data'%(str(i_sub), channel_limit))
     
         print('Calculate conditional entropy...')
         _ = add_features.calculate_CE(X, './raw_data/CE_sub%d_channel%d_nolog.data'%(i_sub, channel_limit))
+    '''
     

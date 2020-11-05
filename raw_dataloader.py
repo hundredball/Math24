@@ -125,6 +125,10 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
         solution latency of example
     C : numpy 1D array
         channel information of example
+    S : numpy 1D array
+        subject ID
+    D : numpy 1D array
+        difficulty level
 
     '''
     
@@ -152,6 +156,7 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
     Y_list_diff_date = [[] for x in range(len(diff_type))]   # Labels
     C_list_diff_date = [[] for x in range(len(diff_type))]   # Channel info
     S_list_diff_date = [[] for x in range(len(diff_type))]   # Subject ID
+    D_list_diff_date = [[] for x in range(len(diff_type))]   # Difficulty level
     
     for i_file, fileName in enumerate(data_names):
         if channel_limit == 12:
@@ -195,17 +200,20 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
             Y_list_diff_date[i_diff].append(Y_sub[diff].copy())
             C_list_diff_date[i_diff].append(C_sub[diff].copy())
             S_list_diff_date[i_diff].append( np.ones(len(X_sub[diff]))*i_file )
+            D_list_diff_date[i_diff].append( np.zeros(len(X_sub[diff]))+i_diff )
         
     # Concatenate over dates
     X_list_diff = []
     Y_list_diff = []
     C_list_diff = []
     S_list_diff = []
+    D_list_diff = []
     for i in range(len(X_list_diff_date)):
         X_list_date = X_list_diff_date[i]
         Y_list_date = Y_list_diff_date[i]
         C_list_date = C_list_diff_date[i]
         S_list_date = S_list_diff_date[i]
+        D_list_date = D_list_diff_date[i]
         
         for j in range(len(X_list_date)):
             if j == 0:
@@ -213,16 +221,20 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
                 Y = Y_list_date[j]
                 C = C_list_date[j]
                 S = S_list_date[j]
+                D = D_list_date[j]
+                
             else:
                 X = np.concatenate((X,X_list_date[j]), axis=0)
                 Y = np.concatenate((Y,Y_list_date[j]))
                 C = np.concatenate((C,C_list_date[j]))
                 S = np.concatenate((S,S_list_date[j]))
+                D = np.concatenate((D,D_list_date[j]))
                 
         X_list_diff.append(X.copy())
         Y_list_diff.append(Y.copy())
         C_list_diff.append(C.copy())
         S_list_diff.append(S.copy())
+        D_list_diff.append(D.copy())
     
     # Concatenate over difficulties
     for i, diff in enumerate(diff_type):
@@ -234,11 +246,13 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
             Y = Y_list_diff[i]
             C = C_list_diff[i]
             S = S_list_diff[i]
+            D = D_list_diff[i]
         else:
             X = np.concatenate((X, X_list_diff[i]), axis=0)
             Y = np.concatenate((Y, Y_list_diff[i]))
             C = np.concatenate((C, C_list_diff[i]))
             S = np.concatenate((S, S_list_diff[i]))
+            D = np.concatenate((D, D_list_diff[i]))
             
     #print('Combined X shape: ', X.shape)
     C = C.astype('int')
@@ -250,6 +264,7 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
     Y = Y[chosen_trials]
     C = C[chosen_trials]
     S = S[chosen_trials]
+    D = D[chosen_trials]
     
     print('After removing trials longer than 60s, X shape: ', X.shape)
     
@@ -274,12 +289,12 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
         temp_X = temp_X.reshape((X.shape[1], -1))
         X[i,:] = temp_X
     
-    return X, Y, C, S
+    return X, Y, C, S, D
 
 
 if __name__ == '__main__':
     
     # Test read_data
-    X, Y, C, S = read_data([1,2,3], list(range(11)), channel_limit=21, rm_baseline = True)
+    X, Y, C, S, D = read_data([1,2,3], list(range(11)), channel_limit=21, rm_baseline = True)
     print('X shape: ', X.shape)
     
