@@ -189,6 +189,33 @@ def get_correlations(ERSP):
             correlation_all[i_sample, i_comb] = correlation
             
     return correlation_all
+
+def get_bandpower_ratio(bp):
+    '''
+    Get bandpower ratios of within and across channels
+
+    Parameters
+    ----------
+    bp : np.ndarray (epoch, channel, band)
+        Bandpower 
+
+    Returns
+    -------
+    None.
+
+    '''
+    assert isinstance(bp, np.ndarray) and bp.ndim==3
+    
+    print('Calculate bandpower ratio...')
+    bp = bp.reshape((bp.shape[0],-1))
+    feature_comb = list(combinations(range(bp.shape[1]), 2))
+    bp_ratios = np.zeros((bp.shape[0], len(feature_comb)))
+    
+    for i_comb, (i,j) in enumerate(feature_comb):
+        bp_ratios[:,i_comb] = bp[:,i]/bp[:,j]
+    
+    return bp_ratios
+    
     
 
 if __name__ == '__main__':

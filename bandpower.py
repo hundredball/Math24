@@ -116,9 +116,11 @@ def STFT(data, SLs, subjects, D, low, high, savePath=None):
     # Remove imaginary part
     Zxx = abs(Zxx)
     
+    '''
     # Transform to dB power
     print('Transform to dB')
     Zxx = 10*np.log10(Zxx)
+    '''
     
     # Find intersecting values in frequency vector
     idx = np.logical_and(new_f >= low, new_f <= high)
@@ -142,7 +144,7 @@ if __name__ == '__main__':
     
     # Save data for all subject
     X, Y_reg, channels, S, D = dl.read_data([1,2,3], list(range(11)), channel_limit=channel_limit, rm_baseline=True)
-    freq, t, Zxx = STFT(X, Y_reg, S, D, 2, 30, savePath='./raw_data/ERSP_from_raw_100_channel%d.data'%(channel_limit))
+    freq, t, Zxx = STFT(X, Y_reg, S, D, 2, 30, savePath='./raw_data/ERSP_from_raw_100_channel%d_nolog.data'%(channel_limit))
     
     '''
     print('Calculate conditional entropy...')

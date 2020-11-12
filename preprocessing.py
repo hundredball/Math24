@@ -440,6 +440,67 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
     
     return select_ERSP, select_indices
 
+def select_correlated_features(X_train, Y_train, X_test, num_features=10):
+    '''
+    Select ERSP whose correlation with solution latency is larger than threshold
+    
+    Parameters
+    ----------
+    X_train : 2d numpy array (epoch, features)
+        Training data
+    Y_train : 1d numpy array 
+        Training targets
+    X_test : 2d numpy array
+        Testing data
+    num_features : float or int
+        Number of features
+    
+    Returns
+    -------
+    select_X_train : 2d numpy array (epoch, features)
+        X_train of interest
+    select_X_test : 2d numpy array (epoch, features)
+        X_test of interest
+    select_indices : 1d numpy array 
+        Indices of selected feature, 0: discard, 1: select
+    
+    '''
+    assert isinstance(X_train, np.ndarray) and X_train.ndim == 2
+    assert isinstance(Y_train, np.ndarray) and Y_train.ndim == 1
+    assert isinstance(X_test, np.ndarray) and X_test.ndim == 2
+    assert (isinstance(num_features, float) and 0<=num_features<=1) or\
+        (isinstance(num_features, int) and num_features>0)
+    
+    # Change the dimension of ERSP_all
+    X_corr = X_train.T
+    #print('Shape of ERSP_corr:', ERSP_corr.shape)
+    
+    # Make SLs the same shape as ERSP_all
+    Y_corr = np.tile(Y_train, (X_corr.shape[0], 1))
+    #print('Shape of SLs_corr: ', SLs_corr.shape)
+    
+    # Calculate the correlation matrix
+    corr_mat = np.corrcoef(X_corr, Y_corr)
+    #print(corr_mat.shape)
+    corr_X_Y = corr_mat[:X_corr.shape[0], X_corr.shape[0]]
+    #print('Shape of corr_ERSP_SLs: ', corr_ERSP_SLs.shape)
+    
+    # Select interested ERSP
+    abs_corr = abs(corr_X_Y)
+    sorted_indices = np.argsort(abs_corr)[::-1]
+    select_indices = np.zeros(X_corr.shape[0])
+    if isinstance(num_features, float):
+        select_indices[abs_corr >= np.quantile(abs_corr, num_features)] = 1
+    else:
+        select_indices[sorted_indices[:num_features]] = 1
+    
+    select_X_train = X_train[:, select_indices==1]
+    select_X_test = X_test[:, select_indices==1]
+    #print(select_ERSP.shape)
+    print('Select %d features'%(np.sum(select_indices)))
+    
+    return select_X_train, select_X_test, select_indices
+
 def trimData(ERSP_all, tmp_all):
     
     num_example = len(ERSP_all)
@@ -581,7 +642,7 @@ def PCA_corr(X_train, Y_train, X_test=None, num_features=2):
         assert isinstance(num_features, int) and num_features>0
     
     # PCA fit
-    pca = PCA(n_components=0.9)
+    pca = PCA(n_components=30)
     pca.fit(X_train)
     X_train_pca = pca.transform(X_train)
 

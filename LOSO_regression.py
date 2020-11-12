@@ -32,11 +32,13 @@ import preprocessing
 import bandpower
 import LSTransform
 import evaluate_result
+import add_features
+import source_separation
 from sklearn.ensemble import RandomForestRegressor
 import models as models
 
 parser = argparse.ArgumentParser(description='Leave one subject out regression')
-parser.add_argument('-i', '--input_type', default='signal', help='Input type (signal, ERSP)')
+parser.add_argument('-i', '--input_type', default='signal', help='Input type (signal, ERSP, bp_ratio)')
 parser.add_argument('-c', '--num_closest', type=int, default=3, help='Number of closest trials for LST')
 parser.add_argument('-d', '--dist_type', type=str, default='target', help='Type of distance for LST (target,correlation)')
 
@@ -45,20 +47,23 @@ parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate'
 parser.add_argument('--dirName', default='LST_regression', help='Name of folder in results')
 
 parser.add_argument('--no_LST', action='store_true', help='Do not use Least-Square Transform')
+parser.add_argument('--SS', action='store_true', help='Source separation')
 parser.add_argument('--classical', action='store_true', help='Use classical regression or not')
 parser.add_argument('--add_sub_diff', action = 'store_true', help='Concatenate with one-hot subject ID and difficulty level')
 
-def classical_regression(train_data, test_data, train_sub, test_sub, train_diff, test_diff):
+def classical_regression(train_data, test_data, train_sub, test_sub, train_diff, test_diff, train_target):
     
     # Flatten the data
     train_data, test_data = train_data.reshape((train_data.shape[0],-1)), test_data.reshape((test_data.shape[0],-1))
     
     # PCA
+    '''
     pca = PCA(n_components=30)
     pca.fit(train_data)
     train_data = pca.transform(train_data)
     test_data = pca.transform(test_data)
-    
+    '''
+    train_data, test_data = preprocessing.PCA_corr(train_data, train_target, test_data, num_features=10)
     
     if args.add_sub_diff:
         # Standardize data
@@ -69,6 +74,7 @@ def classical_regression(train_data, test_data, train_sub, test_sub, train_diff,
         test_data = np.concatenate((test_data, test_sub, test_diff), axis=1)
     
     # Regression
+    #rgr_model = LinearRegression()
     rgr_model = RandomForestRegressor(max_depth=10, random_state=10, n_estimators=100)
     rgr_model.fit(train_data, train_target)
     train_pred = rgr_model.predict(train_data)
@@ -308,11 +314,17 @@ if __name__ == '__main__':
     # Load data
     if args.input_type == 'signal':
         X,Y,_,S,D = raw_dataloader.read_data([1,2,3], range(11), channel_limit=21, rm_baseline=True)
+        X = np.random.rand(X.shape[0], X.shape[1], X.shape[2])
     elif args.input_type == 'ERSP':
         with open('./raw_data/ERSP_from_raw_100_channel21.data', 'rb') as fp:
             dict_ERSP = pickle.load(fp)
         ERSP, Y, S, D = dict_ERSP['ERSP'], dict_ERSP['SLs'], dict_ERSP['Sub_ID'], dict_ERSP['D']
         X, Y = preprocessing.standardize(ERSP, Y, threshold=0.0)
+    elif args.input_type == 'bp_ratio':
+        X,Y,_,S,D = raw_dataloader.read_data([1,2,3], range(11), channel_limit=21, rm_baseline=True)
+        low, high = [4], [30]
+        X = bandpower.get_bandpower(X, low=low, high=high)
+        X = add_features.get_bandpower_ratio(X)
     
     # Create folder for results of this model
     if not os.path.exists('./results/%s'%(args.dirName)):
@@ -348,6 +360,13 @@ if __name__ == '__main__':
                 lst_model.fit_(train_data, train_target, train_sub)
                 train_data = lst_model.transform_(train_data, train_target, train_sub, args.num_closest, args.dist_type)
             
+            if args.SS:     # Source separation
+                print('Apply source separation for time signal...')
+                SS_model = source_separation.SourceSeparation(train_data.shape[1], 11)
+                SS_model.fit(train_data, train_sub)
+                train_data = SS_model.transform(train_data, train_sub)
+                test_data = SS_model.transform(test_data, test_sub)
+            
             # Regression
             if args.classical:
                 
@@ -357,7 +376,7 @@ if __name__ == '__main__':
                 train_diff = onehot_encode(train_diff, 3)
                 test_diff = onehot_encode(test_diff, 3)
                 
-                train_pred, test_pred = classical_regression(train_data, test_data, train_sub, test_sub, train_diff, test_diff)
+                train_pred, test_pred = classical_regression(train_data, test_data, train_sub, test_sub, train_diff, test_diff, train_target)
             
                 # Record error and prediction
                 train_std = mean_squared_error(train_target, train_pred)**0.5
@@ -378,17 +397,18 @@ if __name__ == '__main__':
             else:
                 deep_regression(train_data, test_data, i_base, i_split)
         
-        log_sub = 'Sub%d    Std: (%.1f,%.1f), MAPE: (%.1f,%.1f)\n'%(i_base, dict_error['train_std'][i_base].avg, dict_error['test_std'][i_base].avg, 
+        log_sub = 'Sub%2d\t\tStd: (%.1f,%.1f), MAPE: (%.1f,%.1f)\n'%(i_base, dict_error['train_std'][i_base].avg, dict_error['test_std'][i_base].avg, 
                                                                           dict_error['train_mape'][i_base].avg, dict_error['test_mape'][i_base].avg)
         print(log_sub)
         log_all.append(log_sub)
             
         if args.classical:
-            #evaluate_result.plot_scatter(train_target, train_pred, dirName=args.dirName, fileName='%s_sub%d_train'%(args.dirName,i_base))
-            evaluate_result.plot_scatter(test_target_all, test_pred_all, dirName=args.dirName, fileName='%s_sub%d'%(args.dirName,i_base))
+            evaluate_result.plot_scatter(train_target, train_pred, dirName=args.dirName, fileName='%s_sub%d_train'%(args.dirName,i_base))
+            #evaluate_result.plot_scatter(test_target_all, test_pred_all, dirName=args.dirName, fileName='%s_sub%d'%(args.dirName,i_base))
             
-    log_total = 'Total    Std: (%.1f,%.1f), MAPE: (%.1f,%.1f)\n'%(avg_list(dict_error['train_std']), avg_list(dict_error['test_std']),
+    log_total = 'Total\t\tStd: (%.1f,%.1f), MAPE: (%.1f,%.1f)\n'%(avg_list(dict_error['train_std']), avg_list(dict_error['test_std']),
                                                                   avg_list(dict_error['train_mape']),avg_list(dict_error['test_mape']))
+    print(log_total)
     log_all.append(log_total)
     
     # Save dict_error
