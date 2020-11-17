@@ -18,7 +18,7 @@ parser.add_argument('-e', '--num_exp', default=10, type=int, help='Number of exp
 parser.add_argument('--ensemble', dest='ensemble', action='store_true', help='Evaluate ensemble results')
 parser.add_argument('--deepex', dest='deepex', action='store_true', help='Deep network extraction with other regression model')
 
-def plot_error(dict_error, dirName, fileName):
+def plot_error(dict_error, dirName, fileName, mode='reg'):
     '''
     Plot the error curve of training and testing data
 
@@ -39,20 +39,36 @@ def plot_error(dict_error, dirName, fileName):
     assert isinstance(dirName, str)
     assert isinstance(fileName, str)
     
-    epoch = list(range(len(dict_error['train_std'])))
-    
     fig, axs = plt.subplots(1,2, figsize=(8,4))
-    axs[0].plot(epoch, dict_error['train_std'], 'r-', epoch, dict_error['test_std'], 'b--')
-    axs[0].set_xlabel('Epoch')
-    axs[0].set_ylabel('Standard error')
-    axs[0].legend(('Train', 'Test'))
-    axs[0].set_title('Last std: (%.3f,%.3f)'%(dict_error['train_std'][-1], dict_error['test_std'][-1]))
     
-    axs[1].plot(epoch, dict_error['train_MAPE'], 'r-', epoch, dict_error['test_MAPE'], 'b--')
-    axs[1].set_xlabel('Epoch')
-    axs[1].set_ylabel('MAPE')
-    axs[1].legend(('Train', 'Test'))
-    axs[1].set_title('Last MAPE: (%.3f,%.3f)'%(dict_error['train_MAPE'][-1], dict_error['test_MAPE'][-1]))
+    if mode == 'reg':
+        epoch = list(range(len(dict_error['train_std'])))
+        
+        axs[0].plot(epoch, dict_error['train_std'], 'r-', epoch, dict_error['test_std'], 'b--')
+        axs[0].set_xlabel('Epoch')
+        axs[0].set_ylabel('Standard error')
+        axs[0].legend(('Train', 'Test'))
+        axs[0].set_title('Last std: (%.3f,%.3f)'%(dict_error['train_std'][-1], dict_error['test_std'][-1]))
+        
+        axs[1].plot(epoch, dict_error['train_mape'], 'r-', epoch, dict_error['test_mape'], 'b--')
+        axs[1].set_xlabel('Epoch')
+        axs[1].set_ylabel('MAPE')
+        axs[1].legend(('Train', 'Test'))
+        axs[1].set_title('Last MAPE: (%.3f,%.3f)'%(dict_error['train_mape'][-1], dict_error['test_mape'][-1]))
+    elif mode == 'class':
+        epoch = list(range(len(dict_error['train_loss'])))
+        
+        axs[0].plot(epoch, dict_error['train_loss'], 'r-', epoch, dict_error['test_loss'], 'b--')
+        axs[0].set_xlabel('Epoch')
+        axs[0].set_ylabel('Cross-entropy loss')
+        axs[0].legend(('Train', 'Test'))
+        axs[0].set_title('Last loss: (%.3f,%.3f)'%(dict_error['train_loss'][-1], dict_error['test_loss'][-1]))
+        
+        axs[1].plot(epoch, dict_error['train_acc']*100, 'r-', epoch, dict_error['test_acc']*100, 'b--')
+        axs[1].set_xlabel('Epoch')
+        axs[1].set_ylabel('Accuracy (%)')
+        axs[1].legend(('Train', 'Test'))
+        axs[1].set_title('Last accuracy: (%.1f,%.1f)'%(dict_error['train_acc'][-1]*100, dict_error['test_acc'][-1]*100))
     
     plt.suptitle(fileName)
     plt.tight_layout(pad=2.0)

@@ -19,13 +19,8 @@ from sklearn.metrics import mean_squared_error
 import torch
 import torch.nn as nn
 import torch.nn.parallel
-import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data as Data
-import torchvision
-import torchvision.models as tv_models
-import torchvision.transforms as transforms
-from torch.utils.data.sampler import SubsetRandomSampler
 
 import raw_dataloader
 import preprocessing
@@ -39,6 +34,7 @@ import models as models
 
 parser = argparse.ArgumentParser(description='Leave one subject out regression')
 parser.add_argument('-i', '--input_type', default='signal', help='Input type (signal, ERSP, bp_ratio)')
+parser.add_argument('-m', '--model_name', default='eegnet', help='Model name for deep learning (eegnet, pcafc)')
 parser.add_argument('-c', '--num_closest', type=int, default=3, help='Number of closest trials for LST')
 parser.add_argument('-d', '--dist_type', type=str, default='target', help='Type of distance for LST (target,correlation)')
 
@@ -82,15 +78,21 @@ def classical_regression(train_data, test_data, train_sub, test_sub, train_diff,
     
     return train_pred, test_pred
         
-def deep_regression(train_data, test_data, i_base, i_split):
+def deep_regression(train_data, test_data, train_target, test_target, i_base, i_split):
     
     # --- Wrap up dataloader ---
     batch_size = 64
     num_channel = train_data.shape[1]
     num_feature = train_data.shape[2]
     
-    [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_feature)) \
-                                       for X in [train_data, test_data]]
+    if args.model_name == 'eegnet':
+        [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_feature)) \
+                                           for X in [train_data, test_data]]
+    elif args.model_name == 'pcafc':
+        [train_data, test_data] = [X.reshape((X.shape[0], -1)) \
+                                           for X in [train_data, test_data]]
+        mean = np.mean(train_data, axis=0)
+        train_data, test_data = train_data - mean, test_data-mean
         
     (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
                 torch.from_numpy, (train_data, train_target, test_data, test_target))
@@ -101,8 +103,11 @@ def deep_regression(train_data, test_data, i_base, i_split):
     test_loader = Data.DataLoader(test_dataset, batch_size=batch_size)
     
     # --- Create model --- 
-    shape_train = train_data.shape
-    model = models.__dict__['eegnet'](nn.ReLU(), (shape_train[2], shape_train[3]), shape_train[3], D=3)
+    if args.model_name == 'eegnet':
+        shape_train = train_data.shape
+        model = models.__dict__['eegnet'](nn.ReLU(), (shape_train[2], shape_train[3]), shape_train[3], D=3)
+    elif args.model_name == 'pcafc':
+        model = models.__dict__['pcafc'](train_data, train_target, num_components=30)
     
     # Run on GPU
     model = model.to(device=device)
@@ -112,11 +117,11 @@ def deep_regression(train_data, test_data, i_base, i_split):
         
     lr_step = [40,70]
     criterion = nn.MSELoss().to(device=device)
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr_rate,momentum=0.9)
-    #optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_rate)
+    #optimizer = torch.optim.SGD(model.parameters(), lr=args.lr_rate,momentum=0.9)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_rate)
     
     # --- Train model ---
-    dict_error = {x:np.zeros(args.num_epoch) for x in ['train_std', 'test_std', 'train_MAPE', 'test_MAPE']}
+    dict_error = {x:np.zeros(args.num_epoch) for x in ['train_std', 'test_std', 'train_mape', 'test_mape']}
     for epoch in range(args.num_epoch):
         
         # Learning rate decay
@@ -124,16 +129,18 @@ def deep_regression(train_data, test_data, i_base, i_split):
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= 0.1
         
-        _, dict_error['train_std'][epoch], dict_error['train_MAPE'][epoch] = \
+        _, dict_error['train_std'][epoch], dict_error['train_mape'][epoch] = \
             train(train_loader, model, criterion, optimizer, epoch)
             
-        _, true, pred, dict_error['test_std'][epoch], dict_error['test_MAPE'][epoch] = \
+        _, true, pred, dict_error['test_std'][epoch], dict_error['test_mape'][epoch] = \
             validate(test_loader, model, criterion)
             
     fileName = args.dirName + '_base%d_split%d'%(i_base, i_split)
     evaluate_result.plot_error(dict_error, args.dirName, fileName)
     evaluate_result.plot_scatter(true, pred, args.dirName, fileName)
         
+    return dict_error['train_std'][-1], dict_error['test_std'][-1], \
+        dict_error['train_mape'][-1], dict_error['test_mape'][-1]
         
 def train(train_loader, model, criterion, optimizer, epoch):
     losses = AverageMeter()
@@ -385,17 +392,19 @@ if __name__ == '__main__':
                 test_mape = mean_absolute_percentage_error(test_target, test_pred)
                 print('Split %d    Std: (%.1f,%.1f), MAPE: (%.1f,%.1f)'%(i_split, 
                                                                          train_std, test_std, train_mape, test_mape))
-                dict_error['train_std'][i_base].update(train_std)
-                dict_error['test_std'][i_base].update(test_std)
-                dict_error['train_mape'][i_base].update(train_mape)
-                dict_error['test_mape'][i_base].update(test_mape)
                 
                 # test_pred_all[curr_test_index:curr_test_index+len(test_index)] = test_pred
                 # test_target_all[curr_test_index:curr_test_index+len(test_index)] = test_target
                 test_pred_all = np.concatenate((test_pred_all, test_pred))
                 test_target_all = np.concatenate((test_target_all, test_target))
             else:
-                deep_regression(train_data, test_data, i_base, i_split)
+                train_std, test_std, train_mape, test_mape = \
+                    deep_regression(train_data, test_data, train_target, test_target, i_base, i_split)
+                    
+            dict_error['train_std'][i_base].update(train_std)
+            dict_error['test_std'][i_base].update(test_std)
+            dict_error['train_mape'][i_base].update(train_mape)
+            dict_error['test_mape'][i_base].update(test_mape)
         
         log_sub = 'Sub%2d\t\tStd: (%.1f,%.1f), MAPE: (%.1f,%.1f)\n'%(i_base, dict_error['train_std'][i_base].avg, dict_error['test_std'][i_base].avg, 
                                                                           dict_error['train_mape'][i_base].avg, dict_error['test_mape'][i_base].avg)

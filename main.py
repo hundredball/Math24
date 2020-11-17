@@ -370,7 +370,7 @@ def main(index_exp, index_split):
     
     # Record loss and accuracy of each epoch
     dict_error = {'train_std': list(range(args.num_epoch)), 'test_std': list(range(args.num_epoch)),
-                  'train_MAPE': list(range(args.num_epoch)), 'test_MAPE': list(range(args.num_epoch))}
+                  'train_mape': list(range(args.num_epoch)), 'test_mape': list(range(args.num_epoch))}
     
     # optionally evaluate the trained model
     if args.evaluate:
@@ -413,11 +413,11 @@ def main(index_exp, index_split):
                 param_group['lr'] *= 0.1
         
         # train for one epoch
-        _, dict_error['train_std'][epoch], dict_error['train_MAPE'][epoch] = \
+        _, dict_error['train_std'][epoch], dict_error['train_mape'][epoch] = \
             train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
-        _, _, _, std_error, dict_error['test_MAPE'][epoch] = validate(test_loader, model, criterion)
+        _, _, _, std_error, dict_error['test_mape'][epoch] = validate(test_loader, model, criterion)
         dict_error['test_std'][epoch] = std_error
 
         # remember best standard error and save checkpoint
