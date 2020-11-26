@@ -11,10 +11,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import time
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import KFold
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.model_selection import KFold, train_test_split
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
+from sklearn.ensemble import RandomForestRegressor
 
 import torch
 import torch.nn as nn
@@ -29,77 +30,70 @@ import LSTransform
 import evaluate_result
 import add_features
 import source_separation
-from sklearn.ensemble import RandomForestRegressor
+import data_augmentation
 import models as models
 
 parser = argparse.ArgumentParser(description='Leave one subject out regression')
 parser.add_argument('-i', '--input_type', default='signal', help='Input type (signal, ERSP, bp_ratio)')
-parser.add_argument('-m', '--model_name', default='eegnet', help='Model name for deep learning (eegnet, pcafc)')
+parser.add_argument('-m', '--model_name', default='eegnet', help='Model name for regression (RF, LR, RR, eegnet, pcafc)')
 parser.add_argument('-c', '--num_closest', type=int, default=3, help='Number of closest trials for LST')
 parser.add_argument('-d', '--dist_type', type=str, default='target', help='Type of distance for LST (target,correlation)')
+parser.add_argument('-a', '--augmentation', type=str, default=None, help='Data augmentation method (SMOTER)')
 
 parser.add_argument('-e', '--num_epoch', type=int, default=100, help='Number of epoch for deep regression')
 parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate')
 parser.add_argument('--dirName', default='LST_regression', help='Name of folder in results')
+parser.add_argument('--SCF', type=int, default=None, help='Number of selected features correlated with SLs')
 
-parser.add_argument('--no_LST', action='store_true', help='Do not use Least-Square Transform')
+parser.add_argument('--PCA', action='store_true', help='PCA for eeg data')
+parser.add_argument('--LST', action='store_true', help='Use Least-Square Transform')
 parser.add_argument('--SS', action='store_true', help='Source separation')
-parser.add_argument('--classical', action='store_true', help='Use classical regression or not')
 parser.add_argument('--add_sub_diff', action = 'store_true', help='Concatenate with one-hot subject ID and difficulty level')
 
-def classical_regression(train_data, test_data, train_sub, test_sub, train_diff, test_diff, train_target):
-    
-    # Flatten the data
-    train_data, test_data = train_data.reshape((train_data.shape[0],-1)), test_data.reshape((test_data.shape[0],-1))
-    
-    # PCA
-    '''
-    pca = PCA(n_components=30)
-    pca.fit(train_data)
-    train_data = pca.transform(train_data)
-    test_data = pca.transform(test_data)
-    '''
-    train_data, test_data = preprocessing.PCA_corr(train_data, train_target, test_data, num_features=10)
-    
-    if args.add_sub_diff:
-        # Standardize data
-        train_data, test_data = preprocessing.scale(train_data, test_data, mode='minmax')
-        
-        # Concatenate subject and difficulty
-        train_data = np.concatenate((train_data, train_sub, train_diff), axis=1)
-        test_data = np.concatenate((test_data, test_sub, test_diff), axis=1)
-    
+def classical_regression(train_data, val_data, test_data, train_target):
+      
     # Regression
-    #rgr_model = LinearRegression()
-    rgr_model = RandomForestRegressor(max_depth=10, random_state=10, n_estimators=100)
+    if args.model_name == 'LR':
+        rgr_model = LinearRegression()
+    elif args.model_name == 'RF':
+        rgr_model = RandomForestRegressor(max_depth=10, random_state=10, n_estimators=100)
+    elif args.model_name == 'RR':
+        rgr_model = Ridge(alpha=10.0)
     rgr_model.fit(train_data, train_target)
     train_pred = rgr_model.predict(train_data)
+    val_pred = rgr_model.predict(val_data)
     test_pred = rgr_model.predict(test_data)
     
-    return train_pred, test_pred
+    w = rgr_model.coef_
+    inter = rgr_model.intercept_
+    print('L2 norm of w: ', w.T.dot(w))
+    print('Intercept: ', inter)
+    
+    return train_pred, val_pred, test_pred
         
-def deep_regression(train_data, test_data, train_target, test_target, i_base, i_split):
+def deep_regression(train_data, val_data, test_data, train_target, val_target, test_target, i_base, i_split):
     
     # --- Wrap up dataloader ---
     batch_size = 64
-    num_channel = train_data.shape[1]
-    num_feature = train_data.shape[2]
     
     if args.model_name == 'eegnet':
-        [train_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_feature)) \
-                                           for X in [train_data, test_data]]
+        num_channel = train_data.shape[1]
+        num_feature = train_data.shape[2]
+        [train_data, val_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_feature)) \
+                                           for X in [train_data, val_data, test_data]]
     elif args.model_name == 'pcafc':
-        [train_data, test_data] = [X.reshape((X.shape[0], -1)) \
-                                           for X in [train_data, test_data]]
-        mean = np.mean(train_data, axis=0)
-        train_data, test_data = train_data - mean, test_data-mean
+        [train_data, val_data, test_data] = [X.reshape((X.shape[0], -1)) \
+                                           for X in [train_data, val_data, test_data]]
+        #mean = np.mean(train_data, axis=0)
+        #train_data, test_data = train_data - mean, test_data-mean
         
-    (train_dataTS, train_targetTS, test_dataTS, test_targetTS) = map(
-                torch.from_numpy, (train_data, train_target, test_data, test_target))
-    [train_dataset,test_dataset] = map(\
-            Data.TensorDataset, [train_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),test_targetTS.float()])
+    (train_dataTS, train_targetTS, val_dataTS, val_targetTS, test_dataTS, test_targetTS) = map(
+                torch.from_numpy, (train_data, train_target, val_data, val_target, test_data, test_target))
+    [train_dataset, val_dataset, test_dataset] = map(\
+            Data.TensorDataset, [train_dataTS.float(),val_dataTS.float(),test_dataTS.float()], [train_targetTS.float(),val_targetTS.float(),test_targetTS.float()])
 
     train_loader = Data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = Data.DataLoader(val_dataset, batch_size=batch_size)
     test_loader = Data.DataLoader(test_dataset, batch_size=batch_size)
     
     # --- Create model --- 
@@ -107,7 +101,7 @@ def deep_regression(train_data, test_data, train_target, test_target, i_base, i_
         shape_train = train_data.shape
         model = models.__dict__['eegnet'](nn.ReLU(), (shape_train[2], shape_train[3]), shape_train[3], D=3)
     elif args.model_name == 'pcafc':
-        model = models.__dict__['pcafc'](train_data, train_target, num_components=30)
+        model = models.__dict__['pcafc'](train_data, train_target, num_components=30, mode='reg', C=1)
     
     # Run on GPU
     model = model.to(device=device)
@@ -121,7 +115,7 @@ def deep_regression(train_data, test_data, train_target, test_target, i_base, i_
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_rate)
     
     # --- Train model ---
-    dict_error = {x:np.zeros(args.num_epoch) for x in ['train_std', 'test_std', 'train_mape', 'test_mape']}
+    dict_error = {x:np.zeros(args.num_epoch) for x in ['train_std', 'val_std', 'test_std', 'train_mape', 'val_mape', 'test_mape']}
     for epoch in range(args.num_epoch):
         
         # Learning rate decay
@@ -132,15 +126,19 @@ def deep_regression(train_data, test_data, train_target, test_target, i_base, i_
         _, dict_error['train_std'][epoch], dict_error['train_mape'][epoch] = \
             train(train_loader, model, criterion, optimizer, epoch)
             
+        _, val_true, val_pred, dict_error['val_std'][epoch], dict_error['val_mape'][epoch] = \
+            validate(val_loader, model, criterion, mode='Val')
+        
         _, true, pred, dict_error['test_std'][epoch], dict_error['test_mape'][epoch] = \
-            validate(test_loader, model, criterion)
+            validate(test_loader, model, criterion, mode='Test')
             
     fileName = args.dirName + '_base%d_split%d'%(i_base, i_split)
     evaluate_result.plot_error(dict_error, args.dirName, fileName)
-    evaluate_result.plot_scatter(true, pred, args.dirName, fileName)
+    evaluate_result.plot_scatter(val_true, val_pred, args.dirName, fileName+'_val')
+    evaluate_result.plot_scatter(true, pred, args.dirName, fileName+'_test')
         
-    return dict_error['train_std'][-1], dict_error['test_std'][-1], \
-        dict_error['train_mape'][-1], dict_error['test_mape'][-1]
+    return dict_error['train_std'][-1], dict_error['val_std'][-1], dict_error['test_std'][-1], \
+        dict_error['train_mape'][-1], dict_error['val_mape'][-1], dict_error['test_mape'][-1]
         
 def train(train_loader, model, criterion, optimizer, epoch):
     losses = AverageMeter()
@@ -188,7 +186,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
     return losses.avg, std_errors.avg, MAPEs.avg
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, mode='Test'):
     losses = AverageMeter()
     std_errors = AverageMeter()
     MAPEs = AverageMeter()
@@ -218,9 +216,9 @@ def validate(val_loader, model, criterion):
         MAPEs.update(mape.data.item(), input.size(0))
 
         if i % 1 == 0:
-            print('Test: [{0}/{1}]\t'
+            print('{0}: [{1}/{2}]\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
-                   i, len(val_loader), loss=std_errors))
+                   mode, i, len(val_loader), loss=std_errors))
             
         # Record target and prediction
         target = target.flatten()
@@ -313,8 +311,13 @@ if __name__ == '__main__':
     global device, args
     
     args = parser.parse_args()
+    if args.model_name in ['RR','LR','RF']:
+        classical = True
+    else:
+        classical = False
+    print('Use model %s\n'%(args.model_name))
     
-    if not args.classical:
+    if not classical:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         print(device)
     
@@ -329,7 +332,7 @@ if __name__ == '__main__':
         X, Y = preprocessing.standardize(ERSP, Y, threshold=0.0)
     elif args.input_type == 'bp_ratio':
         X,Y,_,S,D = raw_dataloader.read_data([1,2,3], range(11), channel_limit=21, rm_baseline=True)
-        low, high = [4], [30]
+        low, high = [4,7,13], [7,13,30]
         X = bandpower.get_bandpower(X, low=low, high=high)
         X = add_features.get_bandpower_ratio(X)
     
@@ -338,7 +341,8 @@ if __name__ == '__main__':
         os.makedirs('./results/%s'%(args.dirName))
     
     # Leave one subject out
-    dict_error = {x:[AverageMeter() for i in range(11)] for x in ['train_std', 'test_std', 'train_mape', 'test_mape']}
+    dict_error = {x:[AverageMeter() for i in range(11)] for x in ['train_std', 'val_std', 'test_std', \
+                                                                  'train_mape', 'val_mape', 'test_mape']}
     log_all = []
     start_time = time.time()
     for i_base in range(11):
@@ -360,63 +364,113 @@ if __name__ == '__main__':
             train_target, test_target = np.concatenate((base_target[train_index],other_target), axis=0), base_target[test_index]
             train_sub, test_sub = np.concatenate((base_sub[train_index],other_sub), axis=0), base_sub[test_index]
             train_diff, test_diff = np.concatenate((base_diff[train_index],other_diff), axis=0), base_diff[test_index]
-            print('Number of train: %d, Number of test: %d'%(len(train_data), len(test_data)))
             
-            if not args.no_LST:
+            # Split training data into training and validation data
+            train_data, val_data, train_sub, val_sub, train_diff, val_diff, train_target, val_target = \
+                train_test_split(train_data, train_sub, train_diff, train_target, test_size=1/9, random_state=32)
+            
+            print('Number of (train, val, test): (%d,%d,%d)'%(len(train_data), len(val_data), len(test_data)))
+            
+            if args.LST:
                 # LST for training data
                 lst_model.fit_(train_data, train_target, train_sub)
                 train_data = lst_model.transform_(train_data, train_target, train_sub, args.num_closest, args.dist_type)
+                val_data = lst_model.transform_(val_data, val_target, val_sub, args.num_closest, args.dist_type)
             
             if args.SS:     # Source separation
                 print('Apply source separation for time signal...')
                 SS_model = source_separation.SourceSeparation(train_data.shape[1], 11)
                 SS_model.fit(train_data, train_sub)
                 train_data = SS_model.transform(train_data, train_sub)
+                val_data = SS_model.transform(val_data, val_sub)
                 test_data = SS_model.transform(test_data, test_sub)
             
-            # Regression
-            if args.classical:
+            # Flatten the data
+            [train_data, val_data, test_data] = [x.reshape((x.shape[0],-1)) for x in [train_data, val_data, test_data]]
+            
+            # Select ERSP correlated with SLs
+            if args.SCF:
+                train_data, test_data, select_indices = preprocessing.select_correlated_features(train_data, \
+                                                                              train_target, test_data, num_features=args.SCF)
+                val_data = val_data[:, select_indices==1]
+            
+            # Data augmentation
+            if args.augmentation == 'SMOTER':
+                train_data, train_target = data_augmentation.aug(train_data, train_target, method=args.augmentation)
+
+            # PCA
+            if args.PCA:
                 
+                pca = PCA(n_components=200)
+                pca.fit(train_data)
+                train_data = pca.transform(train_data)
+                val_data = pca.transform(val_data)
+                test_data = pca.transform(test_data)
+                
+                #train_data, test_data = preprocessing.PCA_corr(train_data, train_target, test_data, num_features=10)
+            
+            # Add subject ID and difficulty level as features
+            if args.add_sub_diff:
                 # Onehot encode subject ID and difficulty level
                 train_sub = onehot_encode(train_sub, 11)
+                val_sub = onehot_encode(val_sub, 11)
                 test_sub = onehot_encode(test_sub, 11)
                 train_diff = onehot_encode(train_diff, 3)
+                val_diff = onehot_encode(val_diff, 3)
                 test_diff = onehot_encode(test_diff, 3)
                 
-                train_pred, test_pred = classical_regression(train_data, test_data, train_sub, test_sub, train_diff, test_diff, train_target)
+                # Standardize data
+                _, test_data = preprocessing.scale(train_data, test_data, mode='minmax')
+                train_data, val_data = preprocessing.scale(train_data, val_data, mode='minmax')
+
+                # Concatenate subject and difficulty
+                train_data = np.concatenate((train_data, train_sub, train_diff), axis=1)
+                val_data = np.concatenate((val_data, val_sub, val_diff), axis=1)
+                test_data = np.concatenate((test_data, test_sub, test_diff), axis=1)
+            
+            # Regression
+            if classical:
+                
+                train_pred, val_pred, test_pred = classical_regression(train_data, val_data, test_data, train_target)
             
                 # Record error and prediction
                 train_std = mean_squared_error(train_target, train_pred)**0.5
+                val_std = mean_squared_error(val_target, val_pred)**0.5
                 test_std = mean_squared_error(test_target, test_pred)**0.5
                 train_mape = mean_absolute_percentage_error(train_target, train_pred)
+                val_mape = mean_absolute_percentage_error(val_target, val_pred)
+                
+                
                 test_mape = mean_absolute_percentage_error(test_target, test_pred)
-                print('Split %d    Std: (%.1f,%.1f), MAPE: (%.1f,%.1f)'%(i_split, 
-                                                                         train_std, test_std, train_mape, test_mape))
+                print('Split %d    Std: (%.1f,%.1f,%.1f), MAPE: (%.1f,%.1f,%.1f)'%(i_split, 
+                                                         train_std, val_std, test_std, train_mape, val_mape, test_mape))
                 
                 # test_pred_all[curr_test_index:curr_test_index+len(test_index)] = test_pred
                 # test_target_all[curr_test_index:curr_test_index+len(test_index)] = test_target
                 test_pred_all = np.concatenate((test_pred_all, test_pred))
                 test_target_all = np.concatenate((test_target_all, test_target))
             else:
-                train_std, test_std, train_mape, test_mape = \
-                    deep_regression(train_data, test_data, train_target, test_target, i_base, i_split)
+                train_std, val_std, test_std, train_mape, val_mape, test_mape = \
+                    deep_regression(train_data, val_data, test_data, train_target, val_target, test_target, i_base, i_split)
                     
-            dict_error['train_std'][i_base].update(train_std)
-            dict_error['test_std'][i_base].update(test_std)
-            dict_error['train_mape'][i_base].update(train_mape)
-            dict_error['test_mape'][i_base].update(test_mape)
+            dict_error['train_std'][i_base].update(train_std, len(train_data))
+            dict_error['val_std'][i_base].update(val_std, len(val_data))
+            dict_error['test_std'][i_base].update(test_std, len(test_data))
+            dict_error['train_mape'][i_base].update(train_mape, len(train_data))
+            dict_error['val_mape'][i_base].update(val_mape, len(val_data))
+            dict_error['test_mape'][i_base].update(test_mape, len(test_data))
         
-        log_sub = 'Sub%2d\t\tStd: (%.1f,%.1f), MAPE: (%.1f,%.1f)\n'%(i_base, dict_error['train_std'][i_base].avg, dict_error['test_std'][i_base].avg, 
-                                                                          dict_error['train_mape'][i_base].avg, dict_error['test_mape'][i_base].avg)
+        log_sub = 'Sub%2d\t\tStd: (%.1f,%.1f,%.1f), MAPE: (%.1f,%.1f,%.1f)\n'%(i_base, dict_error['train_std'][i_base].avg, dict_error['val_std'][i_base].avg, dict_error['test_std'][i_base].avg, 
+                                                                          dict_error['train_mape'][i_base].avg, dict_error['val_mape'][i_base].avg, dict_error['test_mape'][i_base].avg)
         print(log_sub)
         log_all.append(log_sub)
             
-        if args.classical:
+        if classical:
             evaluate_result.plot_scatter(train_target, train_pred, dirName=args.dirName, fileName='%s_sub%d_train'%(args.dirName,i_base))
             #evaluate_result.plot_scatter(test_target_all, test_pred_all, dirName=args.dirName, fileName='%s_sub%d'%(args.dirName,i_base))
             
-    log_total = 'Total\t\tStd: (%.1f,%.1f), MAPE: (%.1f,%.1f)\n'%(avg_list(dict_error['train_std']), avg_list(dict_error['test_std']),
-                                                                  avg_list(dict_error['train_mape']),avg_list(dict_error['test_mape']))
+    log_total = 'Total\t\tStd: (%.1f,%.1f,%.1f), MAPE: (%.1f,%.1f,%.1f)\n'%(avg_list(dict_error['train_std']), avg_list(dict_error['val_std']), avg_list(dict_error['test_std']),
+                                                                  avg_list(dict_error['train_mape']), avg_list(dict_error['val_mape']), avg_list(dict_error['test_mape']))
     print(log_total)
     log_all.append(log_total)
     

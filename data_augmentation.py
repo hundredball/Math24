@@ -311,8 +311,8 @@ def aug(data, target, method, params=None):
         
     print('> After %s'%(method))
     print('Mean of all trials: %f'%(np.mean(target)))
-    print('Data: %s -> %s'%(ori_data_shape, data.shape))
-    print('Target: %s -> %s'%(ori_target_shape, target.shape))
+    print('Data:\t %s -> %s'%(ori_data_shape, data.shape))
+    print('Target:\t %s -> %s'%(ori_target_shape, target.shape))
         
     return data, target
 

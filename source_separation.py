@@ -9,6 +9,9 @@ Created on Sat Nov  7 17:38:58 2020
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy import signal
+from sklearn.decomposition import FastICA
 
 import raw_dataloader
 
@@ -144,13 +147,66 @@ class SourceSeparation(object):
                 if i==j:
                     A[i,j] = 1
         
-        return A
+        return A        
         
+def plot_mixture_sources_predictions(X, original_sources, S):
+    fig = plt.figure()
+    plt.subplot(3, 1, 1)
+    for x in X:
+        plt.plot(x)
+    plt.title("mixtures")
+    plt.subplot(3, 1, 2)
+    for s in original_sources:
+        plt.plot(s)
+    plt.title("real sources")
+    plt.subplot(3,1,3)
+    for s in S:
+        plt.plot(s)
+    plt.title("predicted sources")
+    
+    fig.tight_layout()
+    plt.show()
+    
 if __name__ == '__main__':
     
+    '''
     X, Y, C, S, D = raw_dataloader.read_data([1,2,3], list(range(11)), channel_limit=21, rm_baseline = True)
     
     separator = SourceSeparation(X.shape[1], 11)
     separator.fit(X, S)
     X_hat = separator.transform(X, S)
+    '''
+    
+    # Test ICA
+    np.random.seed(0)
+    n_samples = 2000
+    time = np.linspace(0, 8, n_samples)
+    s1 = np.sin(2 * time)+1
+    s2 = np.sign(np.sin(3 * time))+1
+    s3 = signal.sawtooth(2 * np.pi * time)+1
+    S = np.c_[s1, s2, s3]
+    S += 0.2 * np.random.normal(size=S.shape)
+    S /= S.std(axis=0)
+    A = np.array([[1, 1, 1], [0.5, 2, 1.0], [1.5, 1.0, 2.0]])
+    X = np.dot(S, A.T)
+    ica = FastICA(n_components=3)
+    ica.fit(X)
+    S_ = ica.transform(X)
+    S__ = ica.components_.dot((X-ica.mean_).T).T
+    print(ica.mean_.shape)
+    fig = plt.figure()
+    models = [X, S, S_,S__]
+    names = ['mixtures', 'real sources', 'predicted sources', 'PS']
+    colors = ['red', 'blue', 'orange']
+    for i, (name, model) in enumerate(zip(names, models)):
+        plt.subplot(5, 1, i+1)
+        plt.title(name)
+        for sig, color in zip (model.T, colors):
+            plt.plot(sig, color=color)
+
+    fig.tight_layout()        
+    plt.show()
+    
+
+    
     

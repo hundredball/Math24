@@ -389,7 +389,7 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
     
     Parameters
     ----------
-    ERSP : 3d numpy array (epoch, channel, freq_step)
+    ERSP : 3d numpy array (epoch, channel, freq_step), 2d numpy array (epoch, features)
         ERSP of all trials
     SLs : 1d numpy array (epoch)
         solution latency of each trials
@@ -406,17 +406,20 @@ def select_correlated_ERSP(ERSP, SLs, threshold_corr=0.75, train_indices = None)
         Indices of selected feature, 0: discard, 1: select
     
     '''
-    assert isinstance(ERSP, np.ndarray) and ERSP.ndim == 3
+    assert isinstance(ERSP, np.ndarray)
     assert isinstance(SLs, np.ndarray) and SLs.ndim == 1
     assert isinstance(threshold_corr, float) and 0<=threshold_corr<=1
     
     if train_indices is None:
         train_indices = np.arange(ERSP.shape[0])
     
+    # Flatten ERSP
+    ERSP = ERSP.reshape((ERSP.shape[0],-1))
+    
     train_ERSP = ERSP[train_indices,:]
     train_SLs = SLs[train_indices]
     # Change the dimension of ERSP_all
-    ERSP_corr = train_ERSP.reshape((train_ERSP.shape[0],-1)).T
+    ERSP_corr = train_ERSP.T
     #print('Shape of ERSP_corr:', ERSP_corr.shape)
     
     # Make SLs the same shape as ERSP_all
@@ -466,7 +469,7 @@ def select_correlated_features(X_train, Y_train, X_test, num_features=10):
     
     '''
     assert isinstance(X_train, np.ndarray) and X_train.ndim == 2
-    assert isinstance(Y_train, np.ndarray) and Y_train.ndim == 1
+    assert isinstance(Y_train, np.ndarray) and Y_train.shape[0] == Y_train.size
     assert isinstance(X_test, np.ndarray) and X_test.ndim == 2
     assert (isinstance(num_features, float) and 0<=num_features<=1) or\
         (isinstance(num_features, int) and num_features>0)
@@ -476,6 +479,7 @@ def select_correlated_features(X_train, Y_train, X_test, num_features=10):
     #print('Shape of ERSP_corr:', ERSP_corr.shape)
     
     # Make SLs the same shape as ERSP_all
+    Y_train = Y_train.flatten()
     Y_corr = np.tile(Y_train, (X_corr.shape[0], 1))
     #print('Shape of SLs_corr: ', SLs_corr.shape)
     

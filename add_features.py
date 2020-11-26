@@ -208,15 +208,18 @@ def get_bandpower_ratio(bp):
     
     print('Calculate bandpower ratio...')
     bp = bp.reshape((bp.shape[0],-1))
-    feature_comb = list(combinations(range(bp.shape[1]), 2))
+    #feature_comb = list(combinations(range(bp.shape[1]), 2))
+    feature_comb = list(permutations(range(bp.shape[1]), 2))
     bp_ratios = np.zeros((bp.shape[0], len(feature_comb)))
     
     for i_comb, (i,j) in enumerate(feature_comb):
         bp_ratios[:,i_comb] = bp[:,i]/bp[:,j]
+        
+    # Log bandpower ratio
+    #bp_ratios = np.log(bp_ratios)
+    print('BR: (%.3f,%.3f)'%(np.max(bp_ratios), np.min(bp_ratios)))
     
     return bp_ratios
-    
-    
 
 if __name__ == '__main__':
     
