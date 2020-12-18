@@ -12,3 +12,4 @@ from .eegnet import *
 from .ensemble import *
 from .ELM import *
 from .tcGAN import *
+from .ICANet import *

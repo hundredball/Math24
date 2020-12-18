@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, FastICA
 
 __all__ = ['mynet', 'simplefc', 'deepfc', 'pcafc', 'pcafc_sd']
 
@@ -292,93 +292,6 @@ def pcafc_sd(train_data, train_target, num_signal_features, num_components=30, m
         weight2 = z.T.dot(np.linalg.inv( np.eye(z.shape[0])/C+z.dot(z.T) )).dot(train_target)[:,np.newaxis]
     
     return PCAFC_SD(num_signal_features, train_data.shape[1]-num_signal_features, weight1, weight2, bias1, mode)
-
-class ICAFC(nn.Module):
-    
-    def __init__(self, in_features, weight1, weight2, bias1, mode):
-        assert weight1.shape[1]==weight2.shape[0]
-        super(PCAFC, self).__init__()
-        
-        
-        num_hidden = weight1.shape[1]
-        '''
-        self.fc1 = nn.Linear(in_features, num_hidden)
-        self.fc2 = nn.Linear(num_hidden, 1)
-        '''
-        self.fc1 = nn.Linear(in_features, num_hidden, bias=True)
-        self.fc2 = nn.Linear(num_hidden, 1, bias=False)
-        
-        # Initialize fc1 by PCA matrix and fc2 by pseudoinverse
-        with torch.no_grad():
-            # Weight in Linear: (out_features, in_features)
-            self.fc1.weight = nn.Parameter(torch.FloatTensor(weight1.T))
-            self.fc2.weight = nn.Parameter(torch.FloatTensor(weight2.T))
-            self.fc1.bias = nn.Parameter(torch.FloatTensor(bias1))
-        self.fc1.weight.requires_grad = True
-        self.fc2.weight.requires_grad = True
-        self.fc1.bias.requires_grad=True
-        
-        if mode == 'class':
-            #self.act = nn.Identity()
-            self.act = nn.Sigmoid()
-            self.out = nn.Sigmoid()
-        elif mode == 'reg':
-            self.act = nn.Sigmoid()
-            self.out = Identity()
-        
-    def forward(self, x):
-        
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.fc2(x)
-        x = self.out(x)
-        
-        return x
-
-def pcafc(train_data, train_target, num_components=30, mode='reg', C=1):
-    '''
-    Build PCAFC network
-
-    Parameters
-    ----------
-    train_data : np.ndarray (epoch, features)
-        Two dimensional training data
-    train_target : np.ndarray
-        Training targets
-    num_components : int
-        Number of components for PCA, which is equivalent as number of units in hidden layer
-    mode : str
-        Classification or regression (class, reg)
-
-    Returns
-    -------
-    None.
-
-    '''
-    assert isinstance(train_data, np.ndarray) and train_data.ndim==2
-    assert isinstance(train_target, np.ndarray) and train_target.ndim==1
-    assert isinstance(num_components, int) and num_components>0
-    assert mode=='class' or mode=='reg'
-    
-    # Apply PCA for train_data
-    pca = PCA(n_components=num_components)
-    pca.fit(train_data)
-    weight1 = pca.components_.T     # (train_data.shape[1]) x (num_components)
-    bias1 = -weight1.T.dot(np.mean(train_data,0))   # (num_components)
-    z = sigmoid(train_data.dot(weight1))
-    
-    # Get Least square solution
-    if mode == 'reg':
-        weight2 = np.linalg.pinv(z).dot(train_target)[:,np.newaxis]
-    elif mode == 'class':
-        # C is the user-defined parameter and provides a trade-off between the distance of 
-        # the separating margin and training error
-        train_target[train_target==0] = -1      # Let target be (1,-1) for the binary ELM
-        weight2 = z.T.dot(np.linalg.inv( np.eye(z.shape[0])/C+z.dot(z.T) )).dot(train_target)[:,np.newaxis]
-    
-    return PCAFC(train_data.shape[1], weight1, weight2, bias1, mode)
-
-    
     
 def simplefc(in_features):
     return SimpleFC(in_features)
