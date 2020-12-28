@@ -9,6 +9,7 @@ Created on Fri Sep 11 11:11:22 2020
 import argparse
 import pickle
 import matplotlib.pyplot as plt
+import matplotlib._color_data as mcd
 from sklearn.metrics import mean_squared_error
 import numpy as np
 
@@ -75,7 +76,7 @@ def plot_error(dict_error, dirName, fileName, mode='reg'):
     plt.savefig('./results/%s/%s_error.png'%(dirName, fileName))
     plt.close()
     
-def plot_scatter(true, pred, dirName, fileName):
+def plot_scatter(true, pred, dirName, fileName, subIDs=None):
     '''
     Plot the scatter plots of true target and prediction
 
@@ -89,6 +90,8 @@ def plot_scatter(true, pred, dirName, fileName):
         Directory after results
     fileName : str
         File name
+    subIDs : iterator
+        Subject ID, default=None
 
     Returns
     -------
@@ -97,16 +100,30 @@ def plot_scatter(true, pred, dirName, fileName):
     '''
     assert hasattr(true, '__iter__')
     assert hasattr(pred, '__iter__')
+    assert len(true)==len(pred)
     assert isinstance(dirName, str)
     assert isinstance(fileName, str)
     
+    colors = ['black', 'yellow', 'sienna', 'purple', 'olive', 'navy', 'lime', 'green', 'cyan', 'darkblue', 'red', 'grey']
+    
     sort_indices = np.argsort(true)
-    fig, axs = plt.subplots(1,2, figsize=(8,4))
+    fig, axs = plt.subplots(1,2, figsize=(16,8))
     mape = np.sum( np.abs( (true-pred)/true ) ) / true.shape[0]
-    axs[0].plot(range(len(true)), true[sort_indices], 'r.', range(len(true)), pred[sort_indices], 'b.')
+    if subIDs is not None and len(np.unique(subIDs))>1:
+        assert len(subIDs) == len(pred)
+        
+        sorted_subIDs = subIDs[sort_indices]
+        unique_subIDs = np.unique(sorted_subIDs)
+        axs[0].plot(range(len(true)), true[sort_indices], marker='.', linestyle='', color=colors[0], label='True')
+        for i_sub, subID in enumerate(unique_subIDs):
+            sub_indices = np.nonzero(sorted_subIDs==subID)[0]
+            axs[0].plot(sub_indices, pred[sort_indices[sub_indices]], marker='.', linestyle='', color=colors[i_sub+1], label='Pred_%d'%(subID))
+        axs[0].legend()
+    else:
+        axs[0].plot(range(len(true)), true[sort_indices], 'r.', range(len(true)), pred[sort_indices], 'b.')
+        axs[0].legend(('True', 'Pred'))
     axs[0].set_xlabel('Record number')
     axs[0].set_ylabel('Solution latency')
-    axs[0].legend(('True', 'Pred'))
     axs[0].set_title('std error = %.3f, MAPE = %.3f'%(mean_squared_error(true, pred)**0.5, mape))
     
     max_value = np.max(np.hstack((true, pred)))

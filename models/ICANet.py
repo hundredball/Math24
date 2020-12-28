@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from scipy.linalg import sqrtm
 from sklearn.decomposition import PCA, FastICA
 
 __all__ = ['icarnn', 'icarnnown', 'icalstmown']
@@ -11,8 +12,8 @@ class ICARNN(nn.Module):
         super(ICARNN, self).__init__()
         
         # ICA layer
-        self.V = nn.Linear(num_channel, num_channel)
-        self.W = nn.Linear(num_channel, num_channel, bias=False)
+        self.V = nn.Linear(num_channel, num_channel) # Whiten matrix
+        self.W = nn.Linear(num_channel, num_channel, bias=False) # Unmixing matrix
         
         # RNN layer
         self.hidden_size = hidden_size
@@ -52,6 +53,32 @@ class ICARNN(nn.Module):
     
     def initHidden(self, num_example, device):
         return torch.zeros(self.num_directions*self.num_layers, num_example, self.hidden_size, device=device)
+    
+    def orthUnmixing(self):
+        '''
+        Orthonormalize row of unmixing matrix
+        '''
+        W_weight = self.W.weight.data
+        
+        # eig_value: 1st col (real), 2nd col (imaginary)
+        eig_value, eig_vector_matrix = torch.eig(W_weight.mm(torch.t(W_weight)), eigenvectors=True)
+        
+        # inverse square root matrix of eigen value matrix
+        sqr_inv_eig_value_matrix = torch.diag(eig_value[:,0]**(-0.5))
+        
+        # W' = (WW^T)^{-0.5} W
+        inv_sqr_WWT = eig_vector_matrix.mm(sqr_inv_eig_value_matrix).mm(torch.t(eig_vector_matrix))
+        W_weight = inv_sqr_WWT.mm(W_weight)
+        
+        self.W.weight.data = W_weight
+        
+    def stopFreezingFE(self):
+        
+        print('>>>Stop freezing ICA layer')
+        for name, item in self._modules.items():
+            if name in ['V','W']:
+                for p in item.parameters():
+                    p.requires_grad = True
 
 def icarnn(train_data, train_target, hidden_size=32, output_size=1):
     '''
@@ -122,20 +149,24 @@ def icarnnown(train_data, train_sub, train_target, hidden_size=32, output_size=1
     
     for subID in subIDs:
         sub_data = train_data[train_sub==subID,:]
+        sub_target = train_target[train_sub==subID]
         print('Sub %d: %d'%(subID, len(sub_data)))
         
+        models.append(icarnn(sub_data, sub_target, hidden_size=hidden_size, output_size=output_size))
+        '''
         # (example, channel, time) -> (example*time, channel)
         sub_data = np.swapaxes(sub_data, 1, 2)
         sub_data = sub_data.reshape((-1, sub_data.shape[2]))
         
         # Apply ICA for train_data of certain subjects
-        ica = FastICA(n_components=num_channel, random_state=23)
+        ica = FastICA(n_components=num_channel, random_state=23, tol = 1e-2, max_iter=400)
         ica.fit(sub_data)
 
         unmixing_matrix = ica.components_.dot(np.linalg.inv(ica.whitening_))
         bias = -ica.whitening_.dot(ica.mean_)
         
         models.append(ICARNN(ica.whitening_, unmixing_matrix, bias, num_channel, hidden_size, output_size))
+        '''
     
     return models
 

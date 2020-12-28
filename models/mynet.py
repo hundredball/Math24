@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 from sklearn.decomposition import PCA, FastICA
 
-__all__ = ['mynet', 'simplefc', 'deepfc', 'pcafc', 'pcafc_sd']
+__all__ = ['mynet', 'simplefc', 'deepfc', 'pcafc', 'pcafcown', 'pcafc_sd']
 
 
 class MyNet(nn.Module):
@@ -129,11 +129,11 @@ class PCAFC(nn.Module):
         with torch.no_grad():
             # Weight in Linear: (out_features, in_features)
             self.fc1.weight = nn.Parameter(torch.FloatTensor(weight1.T))
-            self.fc2.weight = nn.Parameter(torch.FloatTensor(weight2.T))
+            #self.fc2.weight = nn.Parameter(torch.FloatTensor(weight2.T))
             self.fc1.bias = nn.Parameter(torch.FloatTensor(bias1))
-        self.fc1.weight.requires_grad = True
-        self.fc2.weight.requires_grad = True
-        self.fc1.bias.requires_grad=True
+        self.fc1.weight.requires_grad = False
+        #self.fc2.weight.requires_grad = True
+        self.fc1.bias.requires_grad=False
         
         if mode == 'class':
             #self.act = nn.Identity()
@@ -151,6 +151,14 @@ class PCAFC(nn.Module):
         x = self.out(x)
         
         return x
+    
+    def stopFreezingFE(self):
+        
+        print('>>>Stop freezing PCA layer')
+        for name, item in self._modules.items():
+            if name == 'fc1':
+                for p in item.parameters():
+                    p.requires_grad = True
 
 def pcafc(train_data, train_target, num_components=30, mode='reg', C=1):
     '''
@@ -194,6 +202,49 @@ def pcafc(train_data, train_target, num_components=30, mode='reg', C=1):
         weight2 = z.T.dot(np.linalg.inv( np.eye(z.shape[0])/C+z.dot(z.T) )).dot(train_target)[:,np.newaxis]
     
     return PCAFC(train_data.shape[1], weight1, weight2, bias1, mode)
+
+def pcafcown(train_data, train_sub, train_target, num_components=30, mode='reg', C=1):
+    '''
+    Build PCAFC networks, each subjects has their own model
+
+    Parameters
+    ----------
+    train_data : np.ndarray (epoch, features)
+        Two dimensional training data
+    train_target : np.ndarray
+        Training targets
+    train_sub : np.ndarray
+        Training subject ID
+    num_components : int
+        Number of components for PCA, which is equivalent as number of units in hidden layer
+    mode : str
+        Classification or regression (class, reg)
+
+    Returns
+    -------
+    None.
+
+    '''
+    assert isinstance(train_data, np.ndarray) and train_data.ndim==2
+    assert isinstance(train_sub, np.ndarray) and train_sub.ndim==1
+    assert isinstance(train_target, np.ndarray) and train_target.ndim==1
+    assert isinstance(num_components, int) and num_components>0
+    assert mode=='class' or mode=='reg'
+    
+    # Separate each subject
+    subIDs = np.unique(train_sub)
+    print('Create %d PCAFC'%(len(subIDs)))
+    models = []
+    
+    for subID in subIDs:
+        sub_data = train_data[train_sub==subID,:]
+        sub_target = train_target[train_sub==subID]
+        print('Sub %d: %d'%(subID, len(sub_data)))
+        
+        models.append(pcafc(sub_data, sub_target, num_components=num_components, mode=mode, C=C))
+    
+    return models
+
     
 class PCAFC_SD(nn.Module):
     

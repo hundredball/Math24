@@ -36,13 +36,14 @@ import models as models
 parser = argparse.ArgumentParser(description='Leave one subject out or cross validation regression')
 parser.add_argument('-v', '--cv_mode', default='LOSO', help='Cross validation mode (LOSO, CV)')
 parser.add_argument('-i', '--input_type', default='signal', help='Input type (signal, ERSP, bp_ratio)')
-parser.add_argument('-m', '--model_name', default='eegnet', help='Model name for regression (RF, LR, RR, eegnet, pcafc, icarnn, icarnnown)')
+parser.add_argument('-m', '--model_name', default='eegnet', help='Model name for regression (RF, LR, RR, eegnet, pcafc, pcafcown, icarnn, icarnnown)')
 parser.add_argument('-c', '--num_closest', type=int, default=3, help='Number of closest trials for LST')
 parser.add_argument('-d', '--dist_type', type=str, default='target', help='Type of distance for LST (target,correlation)')
 parser.add_argument('-a', '--augmentation', type=str, default=None, help='Data augmentation method (SMOTER)')
 
-parser.add_argument('-e', '--num_epoch', type=int, default=100, help='Number of epoch for deep regression')
-parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate')
+parser.add_argument('-e', '--num_epoch', type=int, default=100, help='Number of epoch for deep regression, default=100')
+parser.add_argument('--SF', type=int, default=-1, help='Stop freezing feature extraction layer until x epochs, default=-1')
+parser.add_argument('--lr_rate', default=0.001, type=float, help='Learning rate, default=0.001')
 parser.add_argument('--dirName', default='', help='Directory name of folder in results')
 parser.add_argument('--SCF', type=int, default=None, help='Number of selected features correlated with SLs')
 
@@ -83,7 +84,7 @@ def deep_regression(train_data, val_data, test_data, train_target, val_target, t
         num_feature = train_data.shape[2]
         [train_data, val_data, test_data] = [X.reshape((X.shape[0], 1, num_channel, num_feature)) \
                                            for X in [train_data, val_data, test_data]]
-    elif args.model_name == 'pcafc':
+    elif args.model_name in ['pcafc','pcafcown']:
         [train_data, val_data, test_data] = [X.reshape((X.shape[0], -1)) \
                                            for X in [train_data, val_data, test_data]]
         #mean = np.mean(train_data, axis=0)
@@ -108,6 +109,8 @@ def deep_regression(train_data, val_data, test_data, train_target, val_target, t
         model = models.__dict__['eegnet'](nn.ReLU(), (shape_train[2], shape_train[3]), shape_train[3], D=3)
     elif args.model_name == 'pcafc':
         model = models.__dict__['pcafc'](train_data, train_target, num_components=30, mode='reg', C=1)
+    elif args.model_name == 'pcafcown':
+        model = models.__dict__['pcafcown'](train_data, train_sub, train_target, num_components=30, mode='reg', C=1)
     elif args.model_name == 'icarnn':
         assert args.input_type == 'signal'
         model = models.__dict__['icarnn'](train_data, train_target, hidden_size=32, output_size=1)
@@ -115,7 +118,7 @@ def deep_regression(train_data, val_data, test_data, train_target, val_target, t
         model = models.__dict__['icarnnown'](train_data, train_sub, train_target, hidden_size=32, output_size=1)
     
     # Run on GPU
-    if args.model_name == 'icarnnown':
+    if args.model_name in ['icarnnown','pcafcown']:
         optimizer = []
         for i in range(len(model)):
             model[i] = model[i].to(device=device)
@@ -130,7 +133,7 @@ def deep_regression(train_data, val_data, test_data, train_target, val_target, t
         #optimizer = torch.optim.SGD(model.parameters(), lr=args.lr_rate,momentum=0.9)
         
     lr_step = []
-    stop_freezing = -1
+    active_flag = False    # flag for freezing layer
     criterion = nn.MSELoss().to(device=device)
     
     # --- Train model ---
@@ -142,28 +145,22 @@ def deep_regression(train_data, val_data, test_data, train_target, val_target, t
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= 0.1
                 
-        # Stop freezing ICA layer
-        if epoch == stop_freezing and args.model_name == 'icarnn':
-            print('>>>Stop freezing ICA layer')
-            for name, item in model._modules.items():
-                if name in ['V','W']:
-                    for p in item.parameters():
-                        p.requires_grad = True
-        elif epoch == stop_freezing and args.model_name == 'icarnnown':
-            print('>>>Stop freezing ICA layer')
+        # Stop freezing ICA layer, PCA layer
+        if epoch == args.SF and args.model_name in ['icarnn', 'pcafc']:
+            model.stopFreezingFE()
+            active_flag = True
+        elif epoch == args.SF and args.model_name in ['icarnnown', 'pcafcown']:
             for model_sub in model:
-                for name, item in model_sub._modules.items():
-                    if name in ['V','W']:
-                        for p in item.parameters():
-                            p.requires_grad = True
+                model_sub.stopFreezingFE()
+            active_flag = True
         
         _, dict_error['train_std'][epoch], dict_error['train_mape'][epoch] = \
-            train(train_loader, model, criterion, optimizer, epoch)
+            train(train_loader, model, criterion, optimizer, epoch, active_flag)
             
-        _, val_true, val_pred, dict_error['val_std'][epoch], dict_error['val_mape'][epoch] = \
+        _, val_true, val_pred, val_subIDs, dict_error['val_std'][epoch], dict_error['val_mape'][epoch] = \
             validate(val_loader, model, criterion, mode='Val')
         
-        _, true, pred, dict_error['test_std'][epoch], dict_error['test_mape'][epoch] = \
+        _, true, pred, subIDs, dict_error['test_std'][epoch], dict_error['test_mape'][epoch] = \
             validate(test_loader, model, criterion, mode='Test')
             
     if args.cv_mode == 'LOSO':
@@ -171,18 +168,16 @@ def deep_regression(train_data, val_data, test_data, train_target, val_target, t
     elif args.cv_mode == 'CV':
         fileName = args.dirName + '_exp%d'%(i_split)
     evaluate_result.plot_error(dict_error, args.dirName, fileName)
-    evaluate_result.plot_scatter(val_true, val_pred, args.dirName, fileName+'_val')
-    evaluate_result.plot_scatter(true, pred, args.dirName, fileName+'_test')
+    evaluate_result.plot_scatter(val_true, val_pred, args.dirName, fileName+'_val', val_subIDs)
+    evaluate_result.plot_scatter(true, pred, args.dirName, fileName+'_test', subIDs)
         
     return dict_error['train_std'][-1], dict_error['val_std'][-1], dict_error['test_std'][-1], \
         dict_error['train_mape'][-1], dict_error['val_mape'][-1], dict_error['test_mape'][-1]
         
-def train(train_loader, model, criterion, optimizer, epoch):
+def train(train_loader, model, criterion, optimizer, epoch, active_flag):
     losses = AverageMeter()
     std_errors = AverageMeter()
     MAPEs = AverageMeter()
-
-    
 
     for i, sample in enumerate(train_loader):
         
@@ -190,19 +185,22 @@ def train(train_loader, model, criterion, optimizer, epoch):
         input = input.to(device=device)
         target = target.to(device=device)
 
-        if args.model_name == 'icarnnown':
+        if args.model_name in ['icarnnown','pcafcown']:
             
             # Separate input and target for each subject
             for subID in torch.unique(subIDs):
-                # switch to train mode
-                model[subID].train()
-                
                 input_sub = input[subIDs==subID,:]
                 target_sub = target[subIDs==subID]
                 model_sub, optimizer_sub = model[subID], optimizer[subID]
                 
-                h0 = model_sub.initHidden(len(target_sub), device)
-                output = model_sub(input_sub, h0)
+                # switch to train mode
+                model_sub.train()
+                
+                if args.model_name == 'icarnnown':
+                    h0 = model_sub.initHidden(len(target_sub), device)
+                    output = model_sub(input_sub, h0)
+                else:
+                    output = model_sub(input_sub)
                 output = output.flatten()
                 loss = criterion(output, target_sub)
                 losses.update(loss.data.item(), input_sub.size(0))
@@ -211,6 +209,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
                 optimizer_sub.zero_grad()
                 loss.backward()
                 optimizer_sub.step()
+                
+                if args.model_name == 'icarnnown' and active_flag:
+                    # Orthonormalize the unmixing matrix
+                    model_sub.orthUnmixing()
 
                 std_error = StandardError(output, target_sub)
                 mape = MAPE(output, target_sub)
@@ -234,6 +236,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
+            if args.model_name == 'icarnn' and active_flag:
+                # Orthonormalize the unmixing matrix
+                model.orthUnmixing()
 
             std_error = StandardError(output, target)
             mape = MAPE(output, target)
@@ -241,7 +247,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
             MAPEs.update(mape.data.item(), input.size(0))
 
         if i % 5 == 0:
-            if args.model_name == 'icarnnown':
+            if args.model_name in ['icarnnown','pcafcown']:
                 curr_lr = optimizer[0].param_groups[0]['lr']
             else:
                 curr_lr = optimizer.param_groups[0]['lr']
@@ -267,21 +273,24 @@ def validate(val_loader, model, criterion, mode='Test'):
         input = input.to(device=device)
         target = target.to(device=device)
         
-        if args.model_name == 'icarnnown':
+        if args.model_name in ['icarnnown', 'pcafcown']:
             # Separate input and target for each subject
             output = torch.zeros(target.shape, device=device)
             for subID in torch.unique(subIDs):
-                # switch to evaluate mode
-                model[subID].eval()
-                
                 indices_sub = torch.nonzero(subIDs==subID).flatten()
                 input_sub = input[indices_sub,:]
                 target_sub = target[indices_sub]
                 model_sub = model[subID]
                 
+                # switch to evaluate mode
+                model_sub.eval()
+                
                 with torch.no_grad():
-                    h0 = model_sub.initHidden(len(target_sub), device)
-                    output_sub = model_sub(input_sub, h0)
+                    if args.model_name == 'icarnnown':
+                        h0 = model_sub.initHidden(len(target_sub), device)
+                        output_sub = model_sub(input_sub, h0)
+                    else: 
+                        output_sub = model_sub(input_sub)
                     output_sub = output_sub.flatten()
                 loss = criterion(output_sub, target_sub)
                 losses.update(loss.data.item(), input_sub.size(0))
@@ -321,18 +330,21 @@ def validate(val_loader, model, criterion, mode='Test'):
         # Record target and prediction
         target = target.flatten()
         output = output.flatten()
+        subIDs = subIDs.flatten()
         if i == 0:
             true = target.cpu().numpy()
             pred = output.cpu().numpy()
+            subject_IDs = subIDs.cpu().numpy()
         else:
             true = np.concatenate((true, target.cpu().numpy()))
             pred = np.concatenate((pred, output.cpu().numpy()))
+            subject_IDs = np.concatenate((subject_IDs, subIDs.cpu().numpy()))
             
         del input
         del target
     torch.cuda.empty_cache()
 
-    return losses.avg, true, pred, std_errors.avg, MAPEs.avg
+    return losses.avg, true, pred, subject_IDs, std_errors.avg, MAPEs.avg
 
 def StandardError(pred, target):
     return torch.sqrt(torch.sum(torch.pow(target-pred,2))/target.size()[0])
