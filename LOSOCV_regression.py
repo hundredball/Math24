@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import time
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.linear_model import LinearRegression, Ridge, BayesianRidge
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
@@ -36,7 +36,7 @@ import models as models
 parser = argparse.ArgumentParser(description='Leave one subject out or cross validation regression')
 parser.add_argument('-v', '--cv_mode', default='LOSO', help='Cross validation mode (LOSO, CV)')
 parser.add_argument('-i', '--input_type', default='signal', help='Input type (signal, ERSP, bp_ratio)')
-parser.add_argument('-m', '--model_name', default='eegnet', help='Model name for regression (RF, LR, RR, eegnet, pcafc, pcafcown, icarnn, icarnnown)')
+parser.add_argument('-m', '--model_name', default='eegnet', help='Model name for regression (Baseline, RF, LR, RR, BRR, eegnet, pcafc, pcafcown, icarnn, icarnnown)')
 parser.add_argument('-c', '--num_closest', type=int, default=3, help='Number of closest trials for LST')
 parser.add_argument('-d', '--dist_type', type=str, default='target', help='Type of distance for LST (target,correlation)')
 parser.add_argument('-a', '--augmentation', type=str, default=None, help='Data augmentation method (SMOTER)')
@@ -55,12 +55,25 @@ parser.add_argument('--add_sub_diff', action = 'store_true', help='Concatenate w
 def classical_regression(train_data, val_data, test_data, train_target):
       
     # Regression
+    if args.model_name == 'Baseline':
+        median_target = np.median(train_target)
+        train_pred = np.zeros(train_data.shape[0]) + median_target
+        val_pred = np.zeros(val_data.shape[0]) + median_target
+        test_pred = np.zeros(test_data.shape[0]) + median_target
+    
+        return train_pred, val_pred, test_pred
+    
     if args.model_name == 'LR':
         rgr_model = LinearRegression()
     elif args.model_name == 'RF':
         rgr_model = RandomForestRegressor(max_depth=10, random_state=10, n_estimators=100)
     elif args.model_name == 'RR':
         rgr_model = Ridge(alpha=10.0)
+    elif args.model_name == 'BRR':
+        init = [1, 1e-3]
+        rgr_model = BayesianRidge()
+        rgr_model.set_params(alpha_init=init[0], lambda_init=init[1])
+        
     rgr_model.fit(train_data, train_target)
     train_pred = rgr_model.predict(train_data)
     val_pred = rgr_model.predict(val_data)
@@ -363,7 +376,7 @@ def mean_absolute_percentage_error(y_true, y_pred):
     #if _is_1d(y_true): 
     #    y_true, y_pred = _check_1d_array(y_true, y_pred)
 
-    return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+    return np.mean(np.abs((y_true - y_pred) / y_true))
         
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -636,15 +649,14 @@ def CV(X, Y, S, D, classical):
             train_mape = mean_absolute_percentage_error(train_target, train_pred)
             val_mape = mean_absolute_percentage_error(val_target, val_pred)
 
-
             test_mape = mean_absolute_percentage_error(test_target, test_pred)
-            print('Split %d    Std: (%.1f,%.1f,%.1f), MAPE: (%.1f,%.1f,%.1f)'%(i_split, 
+            print('Split %d    Std: (%.1f,%.1f,%.1f), MAPE: (%.1f,%.1f,%.1f)'%(i_exp, 
                                                      train_std, val_std, test_std, train_mape, val_mape, test_mape))
 
             # test_pred_all[curr_test_index:curr_test_index+len(test_index)] = test_pred
             # test_target_all[curr_test_index:curr_test_index+len(test_index)] = test_target
-            test_pred_all = np.concatenate((test_pred_all, test_pred))
-            test_target_all = np.concatenate((test_target_all, test_target))
+            # test_pred_all = np.concatenate((test_pred_all, test_pred))
+            # test_target_all = np.concatenate((test_target_all, test_target))
         else:
             train_std, val_std, test_std, train_mape, val_mape, test_mape = \
                 deep_regression(train_data, val_data, test_data, train_target, val_target, test_target, train_sub, 
@@ -676,7 +688,7 @@ if __name__ == '__main__':
     global device, args
     
     args = parser.parse_args()
-    if args.model_name in ['RR','LR','RF']:
+    if args.model_name in ['Baseline', 'RR','LR','RF', 'BRR']:
         classical = True
     else:
         classical = False
