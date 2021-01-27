@@ -49,29 +49,29 @@ def extract_data(data, events, i_file, diff_type, rm_baseline):
     sampling_rate = 256
     time_baseline = int(sampling_rate/2)
     num_channel = data.shape[0]
-    num_epoch = sum([1 if x[1]==diff_type else 0 for x in events])
-    X = np.zeros((num_epoch, num_channel, sampling_rate*2))
-    Y = np.zeros(num_epoch)
+    X = []
+    Y = []
     
-    iter_event = 0
-    for i in range(events.shape[0]):
-        event = events[i]
-        event_time = int(event[0])
-        event_type = event[1]
+    for i in range(len(events)-1):
+        # In event : [time, type]
+        cur_event = events[i]
+        next_event = events[i+1]
+        cur_time = int(cur_event[0])
         
-        if event_type == diff_type:
-            
-            X[iter_event,:,:] = data[:, event_time-2*sampling_rate+1:event_time+1]
+        if cur_event[1] == diff_type and next_event[1] == '501':
+            X.append(data[:, cur_time-2*sampling_rate+1:cur_time+1])
             if rm_baseline:
                 baseline = np.mean(data[:, int(events[i-1,0])-time_baseline:int(events[i-1,0])], axis=1)
-                X[iter_event,:,:] -= baseline[:,np.newaxis] 
+                X[-1] -= baseline[:,np.newaxis] 
             
-            Y[iter_event] = int(events[i+1,0] - event_time)/sampling_rate
-            iter_event += 1
-            
+            Y.append(float((next_event[0] - cur_time)/sampling_rate))
+          
+    X = np.array(X)
+    Y = np.array(Y)
     C = np.zeros(X.shape[0]) + i_file
     
     return X, Y, C
+
     
 def generate_class(Y_SL):
     '''
