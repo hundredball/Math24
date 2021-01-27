@@ -98,7 +98,20 @@ def generate_class(Y_SL):
     Y_class[Y_class>=threshold] = 1
     
     return Y_class
+
+def read_channel_name(channel_limit=21):
+    '''
+    Load channel names
+    '''
+    assert channel_limit in [12,21]
     
+    # Order of channels
+    if channel_limit == 12:
+        channel_order = pd.read_csv('./Channel_coordinate/Channel_location_angle_12.csv')['Channel'].values
+    elif channel_limit == 21:
+        channel_order = pd.read_csv('./Channel_coordinate/Channel_location_angle_21.csv')['Channel'].values
+        
+    return channel_order
     
 def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
     '''
@@ -271,10 +284,7 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
     print('Arrange all the channels as the same order\n')
     
     # Order of channels
-    if channel_limit == 12:
-        channel_order = pd.read_csv('%s/Channel_coordinate/Channel_location_angle_12.csv'%(root_path))['Channel'].values
-    elif channel_limit == 21:
-        channel_order = pd.read_csv('%s/Channel_coordinate/Channel_location_angle_21.csv'%(root_path))['Channel'].values
+    channel_order = read_channel_name(channel_limit)
     
     # Arrange all the channels in the same order
     for i in range(X.shape[0]):
