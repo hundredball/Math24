@@ -61,7 +61,8 @@ def extract_data(data, events, i_file, diff_type, rm_baseline):
         if cur_event[1] == diff_type and next_event[1] == '501':
             X.append(data[:, cur_time-2*sampling_rate+1:cur_time+1])
             if rm_baseline:
-                baseline = np.mean(data[:, int(events[i-1,0])-time_baseline:int(events[i-1,0])], axis=1)
+                #baseline = np.mean(data[:, int(events[i-1,0])-time_baseline:int(events[i-1,0])], axis=1)
+                baseline = np.mean(data[:, cur_time-int(2.5*sampling_rate):cur_time-int(2*sampling_rate)], axis=1)
                 X[-1] -= baseline[:,np.newaxis] 
             
             Y.append(float((next_event[0] - cur_time)/sampling_rate))
