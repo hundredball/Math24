@@ -61,7 +61,7 @@ def get_bandpower(data, low = [4,7,13], high=[7,13,30]):
 
     return powers
 
-def STFT(data, SLs, subjects, D, low, high, savePath=None):
+def STFT(data, SLs, subjects, D, low, high, savePath=None, noverlap=512-3):
     '''
     Adopt STFT to data to get ERSP, and finally save it
 
@@ -99,9 +99,10 @@ def STFT(data, SLs, subjects, D, low, high, savePath=None):
     assert isinstance(D, np.ndarray) and D.ndim==1
     assert isinstance(low, int) and isinstance(high, int)
     assert (high >= low >= 0)
+    assert isinstance(noverlap, int) and noverlap < 512
     
     print('--- STFT ---\n')
-    f, t, Zxx = signal.stft(data, fs, nperseg = 512, noverlap = 512-3, axis=2)
+    f, t, Zxx = signal.stft(data, fs, nperseg = 512, noverlap = noverlap, axis=2)
     
     '''
     # Interpolate to make 114 steps for 2-30 Hz
