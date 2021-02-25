@@ -61,7 +61,7 @@ def get_bandpower(data, low = [4,7,13], high=[7,13,30]):
 
     return powers
 
-def STFT(data, SLs, subjects, D, low, high, savePath=None, noverlap=512-3):
+def STFT(data, SLs, subjects, D, low, high, savePath=None, nperseg=512, noverlap=512-3):
     '''
     Adopt STFT to data to get ERSP, and finally save it
 
@@ -99,10 +99,10 @@ def STFT(data, SLs, subjects, D, low, high, savePath=None, noverlap=512-3):
     assert isinstance(D, np.ndarray) and D.ndim==1
     assert isinstance(low, int) and isinstance(high, int)
     assert (high >= low >= 0)
-    assert isinstance(noverlap, int) and noverlap < 512
+    assert isinstance(noverlap, int) and noverlap < nperseg
     
-    print('--- STFT ---\n')
-    f, t, Zxx = signal.stft(data, fs, nperseg = 512, noverlap = noverlap, axis=2)
+    #print('--- STFT ---\n')
+    f, t, Zxx = signal.stft(data, fs, nperseg = nperseg, noverlap = noverlap, axis=2)
     
     '''
     # Interpolate to make 114 steps for 2-30 Hz
@@ -125,7 +125,7 @@ def STFT(data, SLs, subjects, D, low, high, savePath=None, noverlap=512-3):
     
     # Find intersecting values in frequency vector
     idx = np.logical_and(new_f >= low, new_f <= high)
-    print('%d - %d Hz: %d steps'%(low, high, np.sum(idx)))
+    #print('%d - %d Hz: %d steps'%(low, high, np.sum(idx)))
     
     # Select 2-30 HZ frequency components
     new_f = new_f[idx]
