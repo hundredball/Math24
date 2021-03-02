@@ -114,8 +114,8 @@ def STFT(data, SLs, subjects, D, low, high, savePath=None, nperseg=512, noverlap
     
     new_f = f
     
-    # Remove imaginary part
-    Zxx = abs(Zxx)
+    # Spectrum = Absolute square of frequency components
+    Zxx = abs(Zxx)**2
     
     '''
     # Transform to dB power
