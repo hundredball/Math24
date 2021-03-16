@@ -25,6 +25,7 @@ def get_bandpower(data, low = [4,7,13], high=[7,13,30]):
     Parameters
     ----------
     data : numpy 3D array (i,j,k) 
+        Time signal data
         i : example
         j : channel
         k : sample
