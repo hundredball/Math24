@@ -114,7 +114,7 @@ def read_channel_name(channel_limit=21):
         
     return channel_order
     
-def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
+def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False, SL_threshold=60):
     '''
     Load data from Data_Python and transform them into input and labels
 
@@ -128,7 +128,8 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
         Number of channels of loaded dataset (12, 21)
     rm_baseline : bool
         Remove baseline before fixation
-
+    SL_threshold : float
+        Remove trials with solution latency higher than threshold
     Returns
     -------
     X : numpy 3D array (i, j, k)
@@ -151,6 +152,7 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
     assert all((isinstance(x, int) and 1<=x<=3) for x in diff_type)
     assert isinstance(rm_baseline, bool)
     assert channel_limit == 12 or channel_limit == 21
+    assert SL_threshold>0
     
     # Assign path depending on regression or classification
     if channel_limit == 21:
@@ -272,8 +274,8 @@ def read_data(diff_type, date = [0], channel_limit = 12, rm_baseline = False):
     C = C.astype('int')
     S = S.astype('int')
     
-    # Remove trials with solution time more than 60 seconds
-    chosen_trials = np.where(Y <= 60)[0]
+    # Remove trials with solution time more than SL_threshold seconds
+    chosen_trials = np.where(Y <= SL_threshold)[0]
     X = X[chosen_trials, :, :]
     Y = Y[chosen_trials]
     C = C[chosen_trials]
